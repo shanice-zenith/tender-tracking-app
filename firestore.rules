@@ -1,0 +1,34 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Quotes ingested from Google Form webhook and synced across tender management
+    match /quotes/{quoteId} {
+      allow read, write: if true;
+    }
+
+    // Live multi-user synchronized tender records & breakdown items
+    match /records/{recordKey} {
+      allow read, write: if true;
+    }
+
+    // Active multi-user viewer presence for scope packages
+    match /active_viewers/{scopeId} {
+      allow read, write: if true;
+    }
+
+    // Projects workspace documents
+    match /projects/{projectId} {
+      allow read, write: if true;
+    }
+
+    // Central contractor & subtrade directory contacts
+    match /contacts/{contactId} {
+      allow read, write: if true;
+    }
+
+    // Scheduled email dispatches and reminders for subtrades
+    match /scheduled_emails/{emailId} {
+      allow read, write: if true;
+    }
+  }
+}

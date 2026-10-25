@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 170" width="640" height="170">
+  <defs>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Montserrat:wght@300;400&display=swap");
+      .zenith-word {
+        font-family: "Cinzel", "Times New Roman", "Baskerville", "Georgia", serif;
+        font-size: 86px;
+        font-weight: 700;
+        letter-spacing: 22px;
+        fill: #0a0a0a;
+        text-anchor: middle;
+      }
+      .group-word {
+        font-family: "Montserrat", "Helvetica Neue", Arial, sans-serif;
+        font-size: 25px;
+        font-weight: 300;
+        letter-spacing: 26px;
+        fill: #171717;
+        text-anchor: middle;
+      }
+    </style>
+  </defs>
+  <!-- ZENITH in Roman Serif -->
+  <text x="331" y="94" class="zenith-word">ZENITH</text>
+  <!-- GROUP in clean tracked Sans-Serif -->
+  <text x="333" y="148" class="group-word">GROUP</text>
+</svg>

@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "Quote": {
+      "collection": "quotes",
+      "fields": {
+        "id": { "type": "string" },
+        "companyName": { "type": "string" },
+        "contractorName": { "type": "string" },
+        "email": { "type": "string" },
+        "projectName": { "type": "string" },
+        "tenderItem": { "type": "string" },
+        "enteredAmount": { "type": "number" },
+        "costCode": { "type": "string" },
+        "tradeScope": { "type": "string" },
+        "notes": { "type": "string" },
+        "docUrl": { "type": "string" },
+        "attachedDocs": { "type": "array" },
+        "submittedAt": { "type": "string" },
+        "lastModifiedBy": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "Record": {
+      "collection": "records",
+      "fields": {
+        "recordKey": { "type": "string" },
+        "projectId": { "type": "string" },
+        "scopeId": { "type": "string" },
+        "lastModifiedBy": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "ActiveViewer": {
+      "collection": "active_viewers",
+      "fields": {
+        "viewers": { "type": "array" }
+      }
+    },
+    "Project": {
+      "collection": "projects",
+      "fields": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "Contact": {
+      "collection": "contacts",
+      "fields": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "company": { "type": "string" },
+        "category": { "type": "string" },
+        "categories": { "type": "array" },
+        "trade_categories": { "type": "array" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "ScheduledEmail": {
+      "collection": "scheduled_emails",
+      "fields": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "scopeId": { "type": "string" },
+        "subcontractorName": { "type": "string" },
+        "subcontractorEmail": { "type": "string" },
+        "scheduledSendTime": { "type": "string" },
+        "status": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  }
+}
