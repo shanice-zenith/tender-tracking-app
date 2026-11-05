@@ -23,7 +23,9 @@ import {
   Loader2,
   CheckSquare,
   AlertTriangle,
-  X
+  X,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import {
   PhaseId,
@@ -91,6 +93,7 @@ import { ApprovedPoExportModal } from './components/ApprovedPoExportModal';
 import { LoginGate } from './components/LoginGate';
 import { useIdleTimeout } from './hooks/useIdleTimeout';
 import { SessionTimeoutModal } from './components/SessionTimeoutModal';
+import { doc, deleteDoc, onSnapshot, collection } from 'firebase/firestore';
 import {
   BudgetMappingResult,
   generateBudgetTemplateCsv,
@@ -121,14 +124,17 @@ export default function App() {
   const [accessDeniedEmail, setAccessDeniedEmail] = useState<string | null>(null);
 
   const [projects, setProjects] = useState<Project[]>(() => storageService.getProjects());
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
+    return localStorage.getItem('zenith_active_project_id') || storageService.getActiveProjectId() || null;
+  });
   const [contacts, setContacts] = useState<Contact[]>(() => storageService.getContacts());
   const [sheetsConfig, setSheetsConfig] = useState<GoogleSheetsConfig>(() => storageService.getSheetsConfig());
   const [syncLogs, setSyncLogs] = useState<SyncLogEntry[]>(() => storageService.getSyncLogs());
 
-  const [quotes, setQuotes] = useState<FirestoreQuoteRecord[]>([]);
+  const [activePhase, setActivePhase] = useState<PhaseId>(() => {
+    return (localStorage.getItem('zenith_active_phase') as PhaseId) || '1A';
+  });
 
-  const [activePhase, setActivePhase] = useState<PhaseId>('1A');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [poSentFilter, setPoSentFilter] = useState<'all' | 'sent' | 'pending'>('all');
@@ -141,14 +147,134 @@ export default function App() {
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
+  const ALL_PHASES: PhaseId[] = ['1A', '1B', '2A', '2B', '3'];
+
+  const PHASE_TITLES: Record<string, string> = {
+    '1A': 'Phase 1A — Civil, Structure & Envelope',
+    '1B': 'Phase 1B — Mechanical & Electrical',
+    '2A': 'Phase 2A — Interior Architecture & Major Finishes',
+    '2B': 'Phase 2B — Millwork & Specialty Finishing',
+    '3': 'Phase 3 — Site Completion & Closeout',
+  };
+
+  const handlePrevPhase = () => {
+    const currentIndex = ALL_PHASES.indexOf(activePhase);
+    const prevIndex = (currentIndex - 1 + ALL_PHASES.length) % ALL_PHASES.length;
+    setActivePhase(ALL_PHASES[prevIndex]);
+  };
+
+  const handleNextPhase = () => {
+    const currentIndex = ALL_PHASES.indexOf(activePhase);
+    const nextIndex = (currentIndex + 1) % ALL_PHASES.length;
+    setActivePhase(ALL_PHASES[nextIndex]);
+  };
+
+
+  // Automatically remember project when changed:
   useEffect(() => {
-    storageService.saveActiveProjectId(null);
-  }, []);
+    if (activeProjectId) {
+      localStorage.setItem('zenith_active_project_id', activeProjectId);
+      storageService.saveActiveProjectId(activeProjectId);
+    }
+  }, [activeProjectId]);
+
+  // Automatically remember phase when changed:
+  useEffect(() => {
+    if (activePhase) {
+      localStorage.setItem('zenith_active_phase', activePhase);
+    }
+  }, [activePhase]);
 
   useEffect(() => {
     setSelectedQuoteIds([]);
   }, [activeProjectId]);
+  // ==========================================
+  // REAL-TIME COLLABORATION LISTENER
+  // Automatically syncs quotes added/edited by other team members
+  // ==========================================
+  // REAL-TIME COLLABORATION LISTENER: PROJECTS & SCOPES
+  // Automatically syncs new/edited scopes created by other team members (Shanice, Nadia, etc.)
+  useEffect(() => {
+    if (!db) return;
 
+    const unsubscribeProjects = onSnapshot(
+      collection(db, 'projects'),
+      (snapshot) => {
+        if (snapshot.empty) return;
+        const liveProjects = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        })) as any[];
+
+        setProjects((prevProjects) => {
+          // Merge remote projects with local state so we don't drop active in-memory references
+          return liveProjects.map((remoteProj) => {
+            const localProj = prevProjects.find((p) => p.id === remoteProj.id);
+            return {
+              ...(localProj || {}),
+              ...remoteProj,
+              // Keep the latest scopes from Firestore
+              scopes: remoteProj.scopes || localProj?.scopes || []
+            };
+          });
+        });
+      },
+      (error) => {
+        console.error('[Firestore] Real-time projects sync error:', error);
+      }
+    );
+
+    return () => unsubscribeProjects();
+  }, []);
+  useEffect(() => {
+    if (!db || !activeProjectId) return;
+
+    // Listen to changes in the 'quotes' collection for the active project
+    const unsubscribe = onSnapshot(
+      collection(db, 'quotes'),
+      (snapshot) => {
+        const liveQuotes = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        })) as any[];
+
+        // Filter quotes belonging to the active project
+        const projectQuotes = liveQuotes.filter(
+          (q) => q.projectId === activeProjectId
+        );
+
+        // Update the active project's scopes with the latest live quotes
+        setProjects((prevProjects) =>
+          prevProjects.map((proj) => {
+            if (proj.id !== activeProjectId) return proj;
+
+            const updatedScopes = proj.scopes?.map((scope) => {
+              // Match quotes strictly by immutable scopeId
+              const matchedQuotes = projectQuotes.filter(
+                (q) => q.scopeId === scope.id
+              );
+
+              return {
+                ...scope,
+                trades: matchedQuotes.length > 0 ? matchedQuotes : scope.trades
+              };
+            });
+
+            return {
+              ...proj,
+              scopes: updatedScopes
+            };
+          })
+        );
+      },
+      (error) => {
+        console.error('[Firestore Snapshot] Real-time sync listener error:', error);
+      }
+    );
+
+    // Clean up listener when switching projects or unmounting
+    return () => unsubscribe();
+  }, [activeProjectId]);
   const handleSignOut = useCallback(async () => {
     await googleAuthService.signOut();
     setCurrentUser(null);
@@ -1326,52 +1452,84 @@ export default function App() {
     persistProjectsAndSync(updated, `Duplicated "${project.name}" successfully`);
   };
 
-  const handleDeleteProject = (projectId: string) => {
+  const handleDeleteProject = async (projectId: string) => {
     const target = projects.find((p) => p.id === projectId);
-    if (target) {
-      setProjectToDelete(target);
-    }
-  };
+    if (!target) return;
 
-  const executeDeleteProject = () => {
-    if (!projectToDelete) return;
-    const targetId = projectToDelete.id;
-    const targetName = projectToDelete.name;
+    if (!window.confirm(`Are you sure you want to delete "${target.name}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    const targetId = target.id;
+    const targetName = target.name;
     const updated = projects.filter((p) => p.id !== targetId);
+
+    // 1. Delete from Firestore if stored as an individual document
+    try {
+      if (db) {
+        await deleteDoc(doc(db, 'projects', targetId));
+      }
+    } catch (e) {
+      console.warn('Firestore doc deletion notice:', e);
+    }
+
+    // 2. Synchronize the updated project list with Firestore & LocalStorage
     persistProjectsAndSync(updated, `Project "${targetName}" deleted.`);
+
+    // 3. Close the drawer if the deleted project is currently open
     if (activeProjectId === targetId) {
       handleNavigateHome();
     }
+
     setProjectToDelete(null);
+  };
+
+  const executeDeleteProject = () => {
+    if (projectToDelete) {
+      handleDeleteProject(projectToDelete.id);
+    }
   };
 
   const handleSaveScope = (scopeData: Partial<ScopeLineItem>) => {
     if (!activeProject) return;
+
     let updatedScopes: ScopeLineItem[];
+
     if (scopeToEdit) {
       updatedScopes = currentProjectScopes.map((s) =>
-        s.id === scopeToEdit.id ? { ...s, ...scopeData } : s
+        s.id === scopeToEdit.id ? { ...s, ...scopeData, updatedAt: new Date().toISOString() } : s
       );
       showToast(`Updated scope "${scopeData.name}"`);
     } else {
+      const targetId = scopeData.id || `scope-${Date.now()}`;
       const newScope: ScopeLineItem = {
-        id: `scope-${Date.now()}`,
+        // 1. Keep all lineItems, costCode, googleFormUrl, tenderDeadline from ScopeModal:
+        ...scopeData,
+        id: targetId,
         phaseId: scopeData.phaseId || activePhase,
         name: scopeData.name || 'New Scope Item',
         description: scopeData.description || '',
-        budgetAmount: scopeData.budgetAmount || 0,
-        trades: [],
+        costCode: scopeData.costCode || '20000',
+        lineItems: scopeData.lineItems || [],
+        budgetAmount: Number(scopeData.budgetAmount) || 0,
+        googleFormUrl: scopeData.googleFormUrl || '',
+        tenderDeadline: scopeData.tenderDeadline || '',
+        trades: scopeData.trades || [],
         isRequired: scopeData.isRequired !== false,
         order: currentPhaseScopes.length + 1,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
       updatedScopes = [...currentProjectScopes, newScope];
       showToast(`Added new scope "${newScope.name}" to Phase ${newScope.phaseId}`);
     }
 
     const updatedProjects = projects.map((p) =>
-      p.id === activeProject.id ? { ...p, scopes: updatedScopes, updatedAt: new Date().toISOString() } : p
+      p.id === activeProject.id
+        ? { ...p, scopes: updatedScopes, updatedAt: new Date().toISOString() }
+        : p
     );
+
     persistProjectsAndSync(updatedProjects);
     setScopeToEdit(null);
   };
@@ -2799,387 +2957,427 @@ export default function App() {
               <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
                 {currentPhaseInfo.name} Scope &amp; Tender Packages
               </h2>
-              {isCurrentPhaseArchived && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
-                  <Archive className="w-3 h-3 text-amber-700" />
-                  Archived / Completed
+              <div className="flex items-center gap-2.5">
+                {/* ⬅️ Previous Phase Arrow */}
+                <button
+                  type="button"
+                  onClick={handlePrevPhase}
+                  className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors cursor-pointer shadow-2xs"
+                  title="Previous Phase"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+
+                <span className={`px-2.5 py-1 text-xs font-extrabold text-white rounded-lg ${isCurrentPhaseArchived ? 'bg-amber-600' : 'bg-blue-600'}`}>
+                  {currentPhaseInfo.code}
                 </span>
-              )}
+                <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+                  {currentPhaseInfo.name} Scope &amp; Tender Packages
+                </h2>
+
+                {/* ➡️ Next Phase Arrow */}
+                <button
+                  type="button"
+                  onClick={handleNextPhase}
+                  className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors cursor-pointer shadow-2xs"
+                  title="Next Phase"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+                {isCurrentPhaseArchived && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
+                    <Archive className="w-3 h-3 text-amber-700" />
+                    Archived / Completed
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                {currentPhaseInfo.description}
+              </p>
             </div>
-            <p className="text-xs text-slate-600 mt-1 max-w-2xl">
-              {currentPhaseInfo.description}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
-              <span className="block text-[10px] uppercase font-bold text-slate-400">Phase Progress</span>
-              <div className="flex items-center gap-2">
-                <span className="text-base font-extrabold text-slate-900">{phaseProgress}%</span>
-                <span className="text-[11px] text-slate-500">
-                  ({phaseBudgetMetrics.poSentCount}/{phaseBudgetMetrics.totalScopesCount} POs)
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
+                <span className="block text-[10px] uppercase font-bold text-slate-400">Phase Progress</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-base font-extrabold text-slate-900">{phaseProgress}%</span>
+                  <span className="text-[11px] text-slate-500">
+                    ({phaseBudgetMetrics.poSentCount}/{phaseBudgetMetrics.totalScopesCount} POs)
+                  </span>
+                </div>
+              </div>
+              <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
+                <span className="block text-[10px] uppercase font-bold text-slate-400">Allocated Budget</span>
+                <span className="text-base font-extrabold text-slate-900 font-mono">
+                  {formatCurrency(phaseBudgetMetrics.totalBudget)}
                 </span>
               </div>
-            </div>
-            <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
-              <span className="block text-[10px] uppercase font-bold text-slate-400">Allocated Budget</span>
-              <span className="text-base font-extrabold text-slate-900 font-mono">
-                {formatCurrency(phaseBudgetMetrics.totalBudget)}
-              </span>
-            </div>
-            <div className="relative" ref={phaseActionsMenuRef}>
-              <button
-                type="button"
-                id="phase-actions-menu-btn"
-                onClick={() => setIsPhaseActionsMenuOpen(!isPhaseActionsMenuOpen)}
-                className="p-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-colors cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                title="Phase Actions &amp; CSV Tools"
-                aria-label="More phase actions"
-                aria-expanded={isPhaseActionsMenuOpen}
-              >
-                <MoreVertical className="w-4 h-4" />
-              </button>
-              {isPhaseActionsMenuOpen && (
-                <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-800">
-                  <div className="py-1">
-                    <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
-                      Phase Management ({currentPhaseInfo.code})
+              <div className="relative" ref={phaseActionsMenuRef}>
+                <button
+                  type="button"
+                  id="phase-actions-menu-btn"
+                  onClick={() => setIsPhaseActionsMenuOpen(!isPhaseActionsMenuOpen)}
+                  className="p-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-colors cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  title="Phase Actions &amp; CSV Tools"
+                  aria-label="More phase actions"
+                  aria-expanded={isPhaseActionsMenuOpen}
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+                {isPhaseActionsMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-800">
+                    <div className="py-1">
+                      <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+                        Phase Management ({currentPhaseInfo.code})
+                      </div>
+                      <button
+                        type="button"
+                        id="phase-menu-archive-btn"
+                        onClick={() => {
+                          setIsPhaseActionsMenuOpen(false);
+                          handleToggleArchivePhase(activePhase);
+                        }}
+                        className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        <Archive className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>
+                          {isCurrentPhaseArchived
+                            ? 'Mark Phase as Active (Unarchive)'
+                            : 'Archive / Mark as Completed'}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        id="phase-menu-delete-btn"
+                        onClick={() => {
+                          setIsPhaseActionsMenuOpen(false);
+                          handleRequestDeletePhase(activePhase);
+                        }}
+                        className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
+                        <span>Delete Phase</span>
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      id="phase-menu-archive-btn"
-                      onClick={() => {
-                        setIsPhaseActionsMenuOpen(false);
-                        handleToggleArchivePhase(activePhase);
-                      }}
-                      className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                    >
-                      <Archive className="w-4 h-4 text-amber-400 shrink-0" />
-                      <span>
-                        {isCurrentPhaseArchived
-                          ? 'Mark Phase as Active (Unarchive)'
-                          : 'Archive / Mark as Completed'}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      id="phase-menu-delete-btn"
-                      onClick={() => {
-                        setIsPhaseActionsMenuOpen(false);
-                        handleRequestDeletePhase(activePhase);
-                      }}
-                      className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 transition-colors cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
-                      <span>Delete Phase</span>
-                    </button>
+                    <div className="py-1">
+                      <button
+                        type="button"
+                        id="phase-menu-export-quote-template-btn"
+                        onClick={() => {
+                          setIsPhaseActionsMenuOpen(false);
+                          handleExportPhaseQuoteTemplate();
+                        }}
+                        className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        <Download className="w-4 h-4 text-blue-400 shrink-0" />
+                        <span>Export Phase Quote Template (.CSV)</span>
+                      </button>
+                      <button
+                        type="button"
+                        id="phase-menu-import-quotes-btn"
+                        onClick={() => {
+                          setIsPhaseActionsMenuOpen(false);
+                          phaseFileInputRef.current?.click();
+                        }}
+                        className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-emerald-300 hover:text-emerald-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        <Upload className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Import Phase Quotes (.CSV)</span>
+                      </button>
+                    </div>
+                    <div className="py-1">
+                      <button
+                        type="button"
+                        id="phase-menu-export-summary-csv-btn"
+                        onClick={() => {
+                          setIsPhaseActionsMenuOpen(false);
+                          handleExportPhaseCsv();
+                        }}
+                        className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Export Current Phase Summary (.CSV)</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="py-1">
-                    <button
-                      type="button"
-                      id="phase-menu-export-quote-template-btn"
-                      onClick={() => {
-                        setIsPhaseActionsMenuOpen(false);
-                        handleExportPhaseQuoteTemplate();
-                      }}
-                      className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                    >
-                      <Download className="w-4 h-4 text-blue-400 shrink-0" />
-                      <span>Export Phase Quote Template (.CSV)</span>
-                    </button>
-                    <button
-                      type="button"
-                      id="phase-menu-import-quotes-btn"
-                      onClick={() => {
-                        setIsPhaseActionsMenuOpen(false);
-                        phaseFileInputRef.current?.click();
-                      }}
-                      className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-emerald-300 hover:text-emerald-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                    >
-                      <Upload className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Import Phase Quotes (.CSV)</span>
-                    </button>
-                  </div>
-                  <div className="py-1">
-                    <button
-                      type="button"
-                      id="phase-menu-export-summary-csv-btn"
-                      onClick={() => {
-                        setIsPhaseActionsMenuOpen(false);
-                        handleExportPhaseCsv();
-                      }}
-                      className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                    >
-                      <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
-                      <span>Export Current Phase Summary (.CSV)</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-              <input
-                ref={phaseFileInputRef}
-                id="phase-import-quotes-input"
-                type="file"
-                accept=".csv,text/csv,text/plain"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    handleImportQuotesFile(file);
-                    e.target.value = '';
-                  }
-                }}
-              />
+                )}
+                <input
+                  ref={phaseFileInputRef}
+                  id="phase-import-quotes-input"
+                  type="file"
+                  accept=".csv,text/csv,text/plain"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      handleImportQuotesFile(file);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </div>
             </div>
           </div>
-        </div>
 
-        {isCurrentPhaseArchived && (
-          <div className="mb-6 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 shadow-xs animate-in fade-in duration-200">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-start gap-3.5">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-600 shrink-0">
-                  <Archive className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-extrabold text-slate-900">
-                      {currentPhaseInfo.name} is Archived &amp; Marked as Completed
-                    </h3>
-                    <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-200 text-amber-900 rounded-md border border-amber-300 font-mono">
-                      COMPLETED
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                    Active tender dispatcher cards are collapsed to de-clutter your active workspace. Final committed totals ({formatCurrency(phaseBudgetMetrics.totalBudget)}) and awarded purchase orders remain preserved in master project budget metrics.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  id="toggle-archived-cards-btn"
-                  onClick={() => setIsArchivedCardsCollapsed(!isArchivedCardsCollapsed)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl border border-amber-300 bg-white text-slate-800 hover:bg-amber-50 transition-colors cursor-pointer shadow-xs"
-                >
-                  {isArchivedCardsCollapsed ? (
-                    <>
-                      <Eye className="w-3.5 h-3.5 text-amber-600" />
-                      <span>Expand Tender Dispatcher Cards ({filteredScopes.length})</span>
-                    </>
-                  ) : (
-                    <>
-                      <EyeOff className="w-3.5 h-3.5 text-amber-600" />
-                      <span>Collapse Tender Dispatcher Cards</span>
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  id="unarchive-phase-btn"
-                  onClick={() => handleToggleArchivePhase(activePhase)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer shadow-xs"
-                >
-                  <span>Mark as Active</span>
-                </button>
-              </div>
-            </div>
-            <div className="mt-4 pt-3.5 border-t border-amber-200/60 grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-white/80 p-2.5 rounded-xl border border-amber-200/60">
-                <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider block">Target Budget</span>
-                <span className="text-sm font-extrabold text-slate-900 font-mono block mt-0.5">{formatCurrency(phaseBudgetMetrics.totalBudget)}</span>
-              </div>
-              <div className="bg-white/80 p-2.5 rounded-xl border border-amber-200/60">
-                <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider block">Committed / Quoted</span>
-                <span className="text-sm font-extrabold text-slate-900 font-mono block mt-0.5">{formatCurrency(phaseBudgetMetrics.totalQuotedCommitted)}</span>
-              </div>
-              <div className="bg-white/80 p-2.5 rounded-xl border border-amber-200/60">
-                <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider block">Awarded POs</span>
-                <span className="text-sm font-extrabold text-emerald-700 font-mono block mt-0.5">{phaseBudgetMetrics.poApprovedCount} of {phaseBudgetMetrics.totalScopesCount} scopes</span>
-              </div>
-              <div className="bg-white/80 p-2.5 rounded-xl border border-amber-200/60">
-                <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider block">Procurement Status</span>
-                <span className="text-sm font-extrabold text-amber-700 block mt-0.5">Completed (Historical)</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {isCurrentPhaseArchived && isArchivedCardsCollapsed ? (
-          <div className="bg-white rounded-2xl border border-dashed border-amber-300 p-8 text-center shadow-xs">
-            <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-2.5">
-              <Archive className="w-5 h-5" />
-            </div>
-            <h4 className="text-sm font-bold text-slate-900">
-              Active Tender Dispatcher Cards Collapsed
-            </h4>
-            <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-              {currentPhaseInfo.name} is archived and completed. Active procurement tender cards are collapsed to keep your workspace decluttered.
-            </p>
-            <div className="mt-4 flex items-center justify-center gap-3">
-              <button
-                type="button"
-                id="expand-collapsed-archived-cards-btn"
-                onClick={() => setIsArchivedCardsCollapsed(false)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
-              >
-                <Eye className="w-3.5 h-3.5" />
-                <span>Expand All {deduplicatedScopes.length} Tender Cards</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleToggleArchivePhase(activePhase)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer"
-              >
-                <span>Mark Phase as Active</span>
-              </button>
-            </div>
-          </div>
-        ) : currentProjectScopes.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
-            <Layers className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <h3 className="text-base font-bold text-slate-800">No scopes found for this project.</h3>
-            <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-              This project does not have any scope line items yet.
-            </p>
-            <div className="mt-4 flex items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setScopeToEdit(null);
-                  setIsScopeModalOpen(true);
-                }}
-                className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg cursor-pointer shadow-2xs"
-              >
-                + Add Scope Item to {currentPhaseInfo.name}
-              </button>
-            </div>
-          </div>
-        ) : deduplicatedScopes.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
-            <Layers className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <h3 className="text-base font-bold text-slate-800">No scope line items found</h3>
-            <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-              No scope items matched your active search query or status filter ({statusFilter}) in {currentPhaseInfo.name}.
-            </p>
-            <div className="mt-4 flex items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery('');
-                  setStatusFilter('ALL');
-                  setPoSentFilter('all');
-                }}
-                className="px-4 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg cursor-pointer"
-              >
-                Reset Filters
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setScopeToEdit(null);
-                  setIsScopeModalOpen(true);
-                }}
-                className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg cursor-pointer"
-              >
-                + Add Scope Item to {currentPhaseInfo.name}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {misassignedCount > 0 && selectedQuoteIds.length === 0 && (
-              <div
-                id="misassigned-detected-banner"
-                className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-amber-900 shadow-2xs animate-in fade-in duration-150"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-700 shrink-0">
-                    <AlertTriangle className="w-4 h-4" />
+          {isCurrentPhaseArchived && (
+            <div className="mb-6 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 shadow-xs animate-in fade-in duration-200">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-600 shrink-0">
+                    <Archive className="w-5 h-5" />
                   </div>
                   <div>
-                    <span className="font-bold">Detected {misassignedCount} Misassigned Quote{misassignedCount === 1 ? '' : 's'}</span>
-                    <p className="text-[11px] text-amber-700">
-                      Quotes whose cost codes do not match their parent scope section's cost code.
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-extrabold text-slate-900">
+                        {currentPhaseInfo.name} is Archived &amp; Marked as Completed
+                      </h3>
+                      <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-200 text-amber-900 rounded-md border border-amber-300 font-mono">
+                        COMPLETED
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                      Active tender dispatcher cards are collapsed to de-clutter your active workspace. Final committed totals ({formatCurrency(phaseBudgetMetrics.totalBudget)}) and awarded purchase orders remain preserved in master project budget metrics.
                     </p>
                   </div>
                 </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    id="toggle-archived-cards-btn"
+                    onClick={() => setIsArchivedCardsCollapsed(!isArchivedCardsCollapsed)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl border border-amber-300 bg-white text-slate-800 hover:bg-amber-50 transition-colors cursor-pointer shadow-xs"
+                  >
+                    {isArchivedCardsCollapsed ? (
+                      <>
+                        <Eye className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Expand Tender Dispatcher Cards ({filteredScopes.length})</span>
+                      </>
+                    ) : (
+                      <>
+                        <EyeOff className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Collapse Tender Dispatcher Cards</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    id="unarchive-phase-btn"
+                    onClick={() => handleToggleArchivePhase(activePhase)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer shadow-xs"
+                  >
+                    <span>Mark as Active</span>
+                  </button>
+                </div>
+              </div>
+              <div className="mt-4 pt-3.5 border-t border-amber-200/60 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-white/80 p-2.5 rounded-xl border border-amber-200/60">
+                  <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider block">Target Budget</span>
+                  <span className="text-sm font-extrabold text-slate-900 font-mono block mt-0.5">{formatCurrency(phaseBudgetMetrics.totalBudget)}</span>
+                </div>
+                <div className="bg-white/80 p-2.5 rounded-xl border border-amber-200/60">
+                  <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider block">Committed / Quoted</span>
+                  <span className="text-sm font-extrabold text-slate-900 font-mono block mt-0.5">{formatCurrency(phaseBudgetMetrics.totalQuotedCommitted)}</span>
+                </div>
+                <div className="bg-white/80 p-2.5 rounded-xl border border-amber-200/60">
+                  <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider block">Awarded POs</span>
+                  <span className="text-sm font-extrabold text-emerald-700 font-mono block mt-0.5">{phaseBudgetMetrics.poApprovedCount} of {phaseBudgetMetrics.totalScopesCount} scopes</span>
+                </div>
+                <div className="bg-white/80 p-2.5 rounded-xl border border-amber-200/60">
+                  <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider block">Procurement Status</span>
+                  <span className="text-sm font-extrabold text-amber-700 block mt-0.5">Completed (Historical)</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isCurrentPhaseArchived && isArchivedCardsCollapsed ? (
+            <div className="bg-white rounded-2xl border border-dashed border-amber-300 p-8 text-center shadow-xs">
+              <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-2.5">
+                <Archive className="w-5 h-5" />
+              </div>
+              <h4 className="text-sm font-bold text-slate-900">
+                Active Tender Dispatcher Cards Collapsed
+              </h4>
+              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                {currentPhaseInfo.name} is archived and completed. Active procurement tender cards are collapsed to keep your workspace decluttered.
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-3">
                 <button
                   type="button"
-                  id="select-misassigned-banner-btn"
-                  onClick={handleSelectAllMisassigned}
-                  className="px-3 py-1.5 font-bold text-xs bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 shadow-2xs"
+                  id="expand-collapsed-archived-cards-btn"
+                  onClick={() => setIsArchivedCardsCollapsed(false)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
                 >
-                  <CheckSquare className="w-3.5 h-3.5" />
-                  <span>Select All Misassigned Quotes</span>
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Expand All {deduplicatedScopes.length} Tender Cards</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleArchivePhase(activePhase)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer"
+                >
+                  <span>Mark Phase as Active</span>
                 </button>
               </div>
-            )}
-            {deduplicatedScopes.map((scope) => (
-              <ScopeItemCard
-                key={scope.id}
-                scope={scope}
-                contacts={contacts}
-                projectName={activeProject?.name}
-                selectedQuoteIds={selectedQuoteIds}
-                onToggleSelectQuote={handleToggleSelectQuote}
-                onSelectMultipleQuotes={handleSelectMultipleQuotes}
-                statusFilter={statusFilter}
-                searchQuery={searchQuery}
-                poSentFilter={poSentFilter}
-                isExpanded={!collapsedScopeIds.has(scope.id)}
-                onToggleExpand={() => handleToggleScopeExpand(scope.id)}
-                onUpdateScope={handleUpdateScope}
-                onDeleteScope={handleDeleteScope}
-                onEditScope={(s) => {
-                  setScopeToEdit(s);
-                  setIsScopeModalOpen(true);
-                }}
-                onAddTradeToScope={(s) => {
-                  setActiveScopeForTrade(s);
-                  setIsTradeModalOpen(true);
-                }}
-                onOpenNotes={(trade) => {
-                  setActiveTradeForNotes(trade);
-                }}
-                onOpenDocViewer={(trade) => {
-                  setActiveTradeForDocs(trade);
-                }}
-                onOpenQuoteBreakdown={(trade, scope) => {
-                  handleOpenQuoteBreakdown(trade, scope);
-                }}
-                onOpenTenderInvite={(scope) => {
-                  setActiveScopeForInvite(scope);
-                }}
-                onOpenTenderReminder={(scope) => {
-                  setActiveScopeForReminder(scope);
-                }}
-                onOpenRevisedEstimate={(scope) => {
-                  setActiveScopeForRevisedEstimate(scope);
-                }}
-                onCancelScheduledEmail={handleCancelScheduledEmail}
-              />
-            ))}
-          </div>
-        )}
+            </div>
+          ) : currentProjectScopes.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
+              <Layers className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <h3 className="text-base font-bold text-slate-800">No scopes found for this project.</h3>
+              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                This project does not have any scope line items yet.
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScopeToEdit(null);
+                    setIsScopeModalOpen(true);
+                  }}
+                  className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg cursor-pointer shadow-2xs"
+                >
+                  + Add Scope Item to {currentPhaseInfo.name}
+                </button>
+              </div>
+            </div>
+          ) : deduplicatedScopes.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs">
+              <Layers className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <h3 className="text-base font-bold text-slate-800">No scope line items found</h3>
+              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                No scope items matched your active search query or status filter ({statusFilter}) in {currentPhaseInfo.name}.
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setStatusFilter('ALL');
+                    setPoSentFilter('all');
+                  }}
+                  className="px-4 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg cursor-pointer"
+                >
+                  Reset Filters
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScopeToEdit(null);
+                    setIsScopeModalOpen(true);
+                  }}
+                  className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg cursor-pointer"
+                >
+                  + Add Scope Item to {currentPhaseInfo.name}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {misassignedCount > 0 && selectedQuoteIds.length === 0 && (
+                <div
+                  id="misassigned-detected-banner"
+                  className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-amber-900 shadow-2xs animate-in fade-in duration-150"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-700 shrink-0">
+                      <AlertTriangle className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="font-bold">Detected {misassignedCount} Misassigned Quote{misassignedCount === 1 ? '' : 's'}</span>
+                      <p className="text-[11px] text-amber-700">
+                        Quotes whose cost codes do not match their parent scope section's cost code.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    id="select-misassigned-banner-btn"
+                    onClick={handleSelectAllMisassigned}
+                    className="px-3 py-1.5 font-bold text-xs bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 shadow-2xs"
+                  >
+                    <CheckSquare className="w-3.5 h-3.5" />
+                    <span>Select All Misassigned Quotes</span>
+                  </button>
+                </div>
+              )}
+              {deduplicatedScopes.map((scope) => (
+                <ScopeItemCard
+                  key={scope.id}
+                  scope={scope}
+                  contacts={contacts}
+                  projectName={activeProject?.name}
+                  selectedQuoteIds={selectedQuoteIds}
+                  onToggleSelectQuote={handleToggleSelectQuote}
+                  onSelectMultipleQuotes={handleSelectMultipleQuotes}
+                  statusFilter={statusFilter}
+                  searchQuery={searchQuery}
+                  poSentFilter={poSentFilter}
+                  isExpanded={!collapsedScopeIds.has(scope.id)}
+                  onToggleExpand={() => handleToggleScopeExpand(scope.id)}
+                  onUpdateScope={handleUpdateScope}
+                  onDeleteScope={handleDeleteScope}
+                  onEditScope={(s) => {
+                    setScopeToEdit(s);
+                    setIsScopeModalOpen(true);
+                  }}
+                  onAddTradeToScope={(s) => {
+                    setActiveScopeForTrade(s);
+                    setIsTradeModalOpen(true);
+                  }}
+                  onOpenNotes={(trade) => {
+                    setActiveTradeForNotes(trade);
+                  }}
+                  onOpenDocViewer={(trade) => {
+                    setActiveTradeForDocs(trade);
+                  }}
+                  onOpenQuoteBreakdown={(trade, scope) => {
+                    handleOpenQuoteBreakdown(trade, scope);
+                  }}
+                  onOpenTenderInvite={(scope) => {
+                    setActiveScopeForInvite(scope);
+                  }}
+                  onOpenTenderReminder={(scope) => {
+                    setActiveScopeForReminder(scope);
+                  }}
+                  onOpenRevisedEstimate={(scope) => {
+                    setActiveScopeForRevisedEstimate(scope);
+                  }}
+                  onCancelScheduledEmail={handleCancelScheduledEmail}
+                />
+              ))}
+            </div>
+          )}
 
-        <div className="mt-8 pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-3">
-          <div className="flex items-center gap-2">
-            <span>Zenith Tender Management — 5-Phase Procurement Engine</span>
-            <span>•</span>
+          {/* Bottom Phase Navigation & Clean Status */}
+          <div className="mt-8 pt-4 pb-8 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+            {/* Left: Previous Phase button */}
             <button
               type="button"
-              onClick={handleResetToDefault}
-              className="text-slate-400 hover:text-slate-700 underline inline-flex items-center gap-1 cursor-pointer"
+              onClick={handlePrevPhase}
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-xl shadow-xs transition-all cursor-pointer"
             >
-              <RotateCcw className="w-3 h-3" />
-              Reset All to Default Seed
+              <ChevronLeft className="w-4 h-4 text-slate-500" />
+              <span>Previous Phase</span>
             </button>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1 text-slate-500 font-medium">
-              <CheckCircle2 className="w-3.5 h-3.5 text-slate-400" />
-              Manual Sheets Sync Only (Auto-Sync Disabled)
-            </span>
+
+            {/* Center: Current Phase Badge */}
+            <div className="text-center">
+              <span className="text-xs font-bold text-slate-800 tracking-wide block">
+                {currentPhaseInfo?.name || `Phase ${activePhase}`}
+              </span>
+              <span className="text-[11px] text-slate-400">
+                Showing {currentPhaseScopes?.length || 0} scopes in this phase
+              </span>
+            </div>
+
+            {/* Right: Next Phase button */}
+            <button
+              type="button"
+              onClick={handleNextPhase}
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs transition-all cursor-pointer"
+            >
+              <span>Next Phase</span>
+              <ChevronRight className="w-4 h-4 text-white" />
+            </button>
           </div>
         </div>
       </main>

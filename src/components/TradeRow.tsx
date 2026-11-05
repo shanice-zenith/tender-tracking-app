@@ -319,20 +319,11 @@ export const TradeRow: React.FC<TradeRowProps> = ({
     }
   };
 
-  const handleDeleteQuote = async (e: React.MouseEvent) => {
+  const handleDeleteQuote = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    try {
-      if (!db) throw new Error("Firestore database is not initialized");
-      await deleteDoc(doc(db, "quotes", quote.id));
-      if ((quote as any).quoteDocId && (quote as any).quoteDocId !== quote.id) {
-        try {
-          await deleteDoc(doc(db, "quotes", (quote as any).quoteDocId));
-        } catch (_) { }
-      }
-      onDeleteTrade?.(quote);
-    } catch (error: any) {
-      alert("Error updating: " + error.message);
+    if (onDeleteTrade) {
+      onDeleteTrade(trade || (quote as any));
     }
   };
 

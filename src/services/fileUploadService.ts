@@ -1,4 +1,4 @@
-import { doc, updateDoc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db } from '../lib/firebase';
 import { sanitizePayload } from './databaseService';
 
@@ -12,7 +12,7 @@ export interface AttachedDocRecord {
   size?: number;
 }
 
-export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB max for file uploads
+export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB max for file uploads
 
 /**
  * Dispatch application toast notification
@@ -81,40 +81,39 @@ export function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-/**
- * Permanent file upload handler:
- * Reads file with FileReader.readAsDataURL and produces a permanent object:
- * { id: Date.now().toString(), name: file.name, url: base64DataUrl, type: file.type, uploadedAt: new Date().toISOString() }
- * Blocks any attempt to save temporary blob: URLs.
- */
+
 export async function uploadQuoteDocument(
   file: File,
   _quoteId = 'general'
 ): Promise<AttachedDocRecord> {
-  if (file.size > MAX_FILE_SIZE_BYTES) {
-    throw new Error(`File "${file.name}" exceeds the limit (${(file.size / (1024 * 1024)).toFixed(1)}MB).`);
+  const MAX_STORAGE_SIZE = 25 * 1024 * 1024;
+  if (file.size > MAX_STORAGE_SIZE) {
+    throw new Error(`File "${file.name}" exceeds the 25MB limit.`);
   }
 
-  // Convert to full permanent Data URL string
-  const base64DataUrl = await readFileAsDataUrl(file);
+  // Initialize storage
+  const storage = getStorage();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `quotes/${_quoteId}/${Date.now()}_${safeName}`;
+  const fileRef = ref(storage, storagePath);
 
-  if (!isValidPermanentUrl(base64DataUrl)) {
-    throw new Error('Upload validation failed: Generated URL is not a valid permanent Data URL.');
-  }
+  // Upload file binary
+  const uploadResult = await uploadBytes(fileRef, file);
 
+  // Get download link
+  const downloadUrl = await getDownloadURL(uploadResult.ref);
   const now = new Date().toISOString();
 
   return {
     id: Date.now().toString(),
     name: file.name,
-    url: base64DataUrl,
+    url: downloadUrl,
     type: file.type || 'application/pdf',
     uploadedAt: now,
     addedAt: now.split('T')[0],
     size: file.size
   };
 }
-
 /**
  * Backward compatibility wrapper for callers expecting uploadLocalQuoteFile
  */
@@ -123,7 +122,7 @@ export async function uploadLocalQuoteFile(file: File): Promise<{
   name: string;
   type?: string;
   size?: number;
-  provider: 'base64_data_url';
+  provider: string;
 }> {
   const result = await uploadQuoteDocument(file);
   return {
@@ -131,7 +130,7 @@ export async function uploadLocalQuoteFile(file: File): Promise<{
     name: result.name,
     type: result.type,
     size: result.size,
-    provider: 'base64_data_url'
+    provider: 'firebase_storage'
   };
 }
 
@@ -142,11 +141,6 @@ export async function processQuoteFileUpload(file: File, quoteId = 'general'): P
   return uploadQuoteDocument(file, quoteId);
 }
 
-/**
- * Persist attachedDocs directly to the Firestore quote document:
- * updateDoc(doc(db, "quotes", quoteId), { attachedDocs: updatedDocsArray })
- * Automatic cleanup rule: Filters out and completely blocks any temporary "blob:" or expired items.
- */
 export async function persistQuoteAttachedDocsToFirestore(
   quoteId: string,
   updatedDocsArray: any[],
@@ -406,10 +400,10 @@ export function openDocumentInNewTab(
     if (win) {
       win.document.write(
         '<!DOCTYPE html><html><head><title>' +
-          safeTitle +
-          '</title><style>html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#525659;}</style></head><body><iframe src="' +
-          url +
-          '" style="width:100%; height:100vh; border:none;"></iframe></body></html>'
+        safeTitle +
+        '</title><style>html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#525659;}</style></head><body><iframe src="' +
+        url +
+        '" style="width:100%; height:100vh; border:none;"></iframe></body></html>'
       );
       win.document.close();
       return;

@@ -1,12 +1,12 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  ChevronDown, 
-  ChevronUp, 
-  Plus, 
-  Edit3, 
-  Trash2, 
-  DollarSign, 
-  CheckCircle2, 
+import {
+  ChevronDown,
+  ChevronUp,
+  Plus,
+  Edit3,
+  Trash2,
+  DollarSign,
+  CheckCircle2,
   AlertCircle,
   FileText,
   Users,
@@ -178,7 +178,7 @@ export const ScopeItemCard: React.FC<ScopeItemCardProps> = ({
       if (quote.quoteDocId && quote.quoteDocId !== quote.id) {
         try {
           await updateDoc(doc(db, "quotes", quote.quoteDocId), { actionItemStatus: newStatus });
-        } catch (_) {}
+        } catch (_) { }
       }
     } catch (error: any) {
       if (error?.code === 'not-found' || error?.message?.includes('No document to update') || error?.message?.includes('not found')) {
@@ -213,17 +213,44 @@ export const ScopeItemCard: React.FC<ScopeItemCardProps> = ({
   };
 
   const handleDeleteTradeClick = async (trade: TradeEntry) => {
-    const quote = trade;
+    const tradeName = trade.companyName || trade.contractorName || 'this quote';
+    const isConfirmed = window.confirm(`Are you sure you want to permanently delete the quote from ${tradeName}?`);
+    if (!isConfirmed) return;
+
+    const targetDocId = (trade as any).quoteDocId || trade.id;
+
     try {
       if (!db) throw new Error("Firestore database is not initialized");
-      await deleteDoc(doc(db, "quotes", quote.id));
-      if (quote.quoteDocId && quote.quoteDocId !== quote.id) {
-        try {
-          await deleteDoc(doc(db, "quotes", quote.quoteDocId));
-        } catch (_) {}
+
+      // 1. Delete from Firestore 'quotes' collection (both IDs if aliased)
+      if (trade.id) {
+        await deleteDoc(doc(db, "quotes", trade.id)).catch(() => { });
       }
+      if ((trade as any).quoteDocId && (trade as any).quoteDocId !== trade.id) {
+        await deleteDoc(doc(db, "quotes", (trade as any).quoteDocId)).catch(() => { });
+      }
+
+      // 2. Remove from the scope's local trades array
+      const remainingTrades = (scope.trades || []).filter(
+        (t) => t.id !== trade.id && (t as any).quoteDocId !== targetDocId
+      );
+
+      const updatedScope = {
+        ...scope,
+        trades: remainingTrades
+      };
+
+      // 3. Persist the updated scope to Firestore project & state
+      if ((props as any).onUpdateScope) {
+        (props as any).onUpdateScope(updatedScope);
+      } else if (typeof onUpdateScope === 'function') {
+        onUpdateScope(updatedScope);
+      }
+
+      console.log(`[Delete Success] Permanently removed quote: ${tradeName}`);
     } catch (error: any) {
-      alert("Error updating: " + error.message);
+      console.error("[ScopeItemCard] Delete error:", error);
+      alert("Failed to delete quote: " + error.message);
     }
   };
 
@@ -241,7 +268,7 @@ export const ScopeItemCard: React.FC<ScopeItemCardProps> = ({
       if (quote.quoteDocId && quote.quoteDocId !== quote.id) {
         try {
           await deleteDoc(doc(db, "quotes", quote.quoteDocId));
-        } catch (_) {}
+        } catch (_) { }
       }
       // Scan and delete matching quote documents & synchronize backend
       await dbService.deleteQuote(quoteId, companyName, scope.projectId);
@@ -277,7 +304,7 @@ export const ScopeItemCard: React.FC<ScopeItemCardProps> = ({
                 {scope.name}
               </h3>
               {(scope.costCode || getAccurateScopeCostCode(scope.name)) && (
-                <span 
+                <span
                   className="px-2 py-0.5 text-[10px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-300 rounded flex items-center gap-1 shadow-2xs"
                   title={`Cost Code: ${scope.costCode || getAccurateScopeCostCode(scope.name)}`}
                 >
@@ -310,7 +337,7 @@ export const ScopeItemCard: React.FC<ScopeItemCardProps> = ({
                 </span>
               )}
               {scope.scheduledInvite && scope.scheduledInvite.status === 'pending' && (
-                <span 
+                <span
                   className="px-2.5 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-full inline-flex items-center gap-1.5 shadow-2xs"
                   title={`Invitation launch scheduled for ${scope.scheduledInvite.scheduledTimeDisplay || scope.scheduledInvite.scheduledTime}`}
                 >
@@ -332,7 +359,7 @@ export const ScopeItemCard: React.FC<ScopeItemCardProps> = ({
                 </span>
               )}
               {scope.scheduledReminder && scope.scheduledReminder.status === 'pending' && (
-                <span 
+                <span
                   className="px-2.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 rounded-full inline-flex items-center gap-1.5 shadow-2xs"
                   title={`Follow-up reminder scheduled for ${scope.scheduledReminder.scheduledTimeDisplay || scope.scheduledReminder.scheduledTime}`}
                 >
@@ -382,11 +409,10 @@ export const ScopeItemCard: React.FC<ScopeItemCardProps> = ({
               </span>
               <div className="flex items-center gap-1">
                 <span
-                  className={`text-sm font-bold tracking-tight ${
-                    awardedTrade.quotedFigure > scope.budgetAmount
+                  className={`text-sm font-bold tracking-tight ${awardedTrade.quotedFigure > scope.budgetAmount
                       ? 'text-rose-600'
                       : 'text-emerald-600'
-                  }`}
+                    }`}
                 >
                   {formatCurrency(awardedTrade.quotedFigure)}
                 </span>
@@ -423,12 +449,12 @@ export const ScopeItemCard: React.FC<ScopeItemCardProps> = ({
                   <span>Send Correspondence</span>
                   <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isSendDropdownOpen ? 'rotate-180' : ''}`} />
                 </button>
-                
+
                 {isSendDropdownOpen && (
                   <>
-                    <div 
-                      className="fixed inset-0 z-40" 
-                      onClick={() => setIsSendDropdownOpen(false)} 
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setIsSendDropdownOpen(false)}
                     />
                     <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-lg shadow-xl z-50 overflow-hidden flex flex-col py-1">
                       {onOpenTenderInvite && (
@@ -449,7 +475,7 @@ export const ScopeItemCard: React.FC<ScopeItemCardProps> = ({
                           </div>
                         </button>
                       )}
-                      
+
                       {onOpenTenderReminder && (
                         <button
                           type="button"

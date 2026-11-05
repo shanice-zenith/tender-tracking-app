@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  X, 
-  DollarSign, 
-  TrendingDown, 
-  TrendingUp, 
-  CheckCircle2, 
-  Plus, 
-  Trash2, 
-  Edit2, 
-  Check, 
-  RotateCcw, 
-  Download, 
-  FileSpreadsheet, 
-  Award, 
+import {
+  X,
+  DollarSign,
+  TrendingDown,
+  TrendingUp,
+  CheckCircle2,
+  Plus,
+  Trash2,
+  Edit2,
+  Check,
+  RotateCcw,
+  Download,
+  FileSpreadsheet,
+  Award,
   Info,
   Building2,
   Ban,
@@ -84,7 +84,7 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
     if (isOpen && scope && trade) {
       const uniqueId = `${scope.id}_${trade.id}`;
       dbService.registerViewer(uniqueId);
-      
+
       const unsubscribe = dbService.listenToViewers(uniqueId, (viewers) => {
         const currentUser = googleAuthService.getCurrentUser();
         const otherViewers = viewers.filter(v => v.email !== currentUser?.email);
@@ -310,7 +310,7 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
 
       setAutoSaveIndicator({
         status: 'saved',
-        message: `Auto-saved & Google Sheet row synced at ${nowDisplay} (${userEmail.split('@')[0]})`,
+        message: `Auto-saved & Google Sheet row synced at ${nowDisplay} (${(userEmail || 'User').split('@')[0]})`,
         time: nowDisplay,
         user: userEmail
       });
@@ -512,14 +512,14 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 md:p-6 animate-in fade-in duration-150">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-5xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
-        
+
         {/* ================= MODAL HEADER ================= */}
         <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/80 flex flex-col gap-3 shrink-0">
           {activeViewers.length > 0 && (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-xs font-semibold animate-in slide-in-from-top-2">
               <Info className="w-4 h-4 text-blue-600" />
               <span>
-                {activeViewers.map(v => v.email.split('@')[0]).join(', ')} {activeViewers.length === 1 ? 'is' : 'are'} currently viewing this scope package.
+                {activeViewers.map(v => (v?.email || 'User').split('@')[0]).join(', ')} {activeViewers.length === 1 ? 'is' : 'are'} currently viewing this scope package.
               </span>
             </div>
           )}
@@ -545,21 +545,10 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Simulate Nadia Remote Edit button for testing Requirement 3 */}
-              <button
-                type="button"
-                onClick={handleSimulateRemoteNadiaEdit}
-                className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer"
-                title="Simulate remote concurrent edit by Nadia to verify real-time merge & conflict notification"
-              >
-                <RefreshCw className="w-3 h-3 text-slate-500" />
-                <span>Simulate Nadia Edit</span>
-              </button>
-
               <button
                 type="button"
                 onClick={handleExportCsv}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg shadow-2xs transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg shadow-xs transition-colors"
                 title="Download itemized tender breakdown as CSV"
               >
                 <Download className="w-3.5 h-3.5 text-slate-500" />
@@ -604,7 +593,7 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
             {trade.lastModifiedBy && (
               <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1 mr-2" title={`Last updated by ${trade.lastModifiedBy}`}>
                 <Sparkles className="w-3 h-3 text-blue-500" />
-                <span>By {trade.lastModifiedBy.split('@')[0]}</span>
+                <span>By {(trade?.lastModifiedBy || 'Estimator').split('@')[0]}</span>
               </span>
             )}
 
@@ -698,10 +687,9 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
                 </span>
               </div>
 
-              <div 
-                className={`text-2xl font-black tracking-tight ${
-                  liveQuotedTotal > scopeBudget ? 'text-rose-600' : 'text-emerald-600'
-                }`}
+              <div
+                className={`text-2xl font-black tracking-tight ${liveQuotedTotal > scopeBudget ? 'text-rose-600' : 'text-emerald-600'
+                  }`}
                 title="Calculated in real-time as the sum of all included breakdown line items"
               >
                 {formatCurrency(liveQuotedTotal)}
@@ -720,13 +708,11 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
             </div>
 
             {/* Card 3: Budget Variance & % Difference */}
-            <div className={`p-4 rounded-xl border shadow-2xs flex flex-col justify-between ${
-              isUnderBudget ? 'bg-emerald-50/50 border-emerald-200' : 'bg-rose-50/50 border-rose-200'
-            }`}>
+            <div className={`p-4 rounded-xl border shadow-2xs flex flex-col justify-between ${isUnderBudget ? 'bg-emerald-50/50 border-emerald-200' : 'bg-rose-50/50 border-rose-200'
+              }`}>
               <div className="flex items-center justify-between mb-1">
-                <span className={`text-[11px] uppercase font-extrabold tracking-wider ${
-                  isUnderBudget ? 'text-emerald-700' : 'text-rose-700'
-                }`}>
+                <span className={`text-[11px] uppercase font-extrabold tracking-wider ${isUnderBudget ? 'text-emerald-700' : 'text-rose-700'
+                  }`}>
                   Budget Variance
                 </span>
                 {isUnderBudget ? (
@@ -735,9 +721,8 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
                   <TrendingUp className="w-4 h-4 text-rose-600" />
                 )}
               </div>
-              <div className={`text-2xl font-black tracking-tight ${
-                isUnderBudget ? 'text-emerald-800' : 'text-rose-800'
-              }`}>
+              <div className={`text-2xl font-black tracking-tight ${isUnderBudget ? 'text-emerald-800' : 'text-rose-800'
+                }`}>
                 {budgetVariance > 0
                   ? `+$${Math.abs(budgetVariance).toLocaleString()}`
                   : budgetVariance < 0
@@ -904,15 +889,14 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
                     const isExcluded = item.inclusionStatus === 'excluded';
 
                     return (
-                      <tr 
+                      <tr
                         key={item.id}
-                        className={`transition-colors ${
-                          isExcluded 
-                            ? 'bg-slate-50/70 text-slate-400' 
-                            : item.inclusionStatus === 'allowance'
+                        className={`transition-colors ${isExcluded
+                          ? 'bg-slate-50/70 text-slate-400'
+                          : item.inclusionStatus === 'allowance'
                             ? 'bg-blue-50/20'
                             : 'hover:bg-slate-50/60'
-                        }`}
+                          }`}
                       >
                         {/* 1. Column: # (Item Number) */}
                         <td className="py-2 px-3 text-slate-400 font-mono text-[11px]">
@@ -940,9 +924,8 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
                             onChange={(e) => handleItemLocalChange(item.id, 'itemDescription', e.target.value)}
                             onBlur={(e) => handleAutoSaveItemField(item.id, 'itemDescription', e.target.value)}
                             placeholder="Tender Form Item Description"
-                            className={`w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-blue-500 rounded px-2 py-1 text-xs font-bold transition-colors focus:outline-none ${
-                              isExcluded ? 'text-slate-400 line-through' : 'text-slate-900'
-                            }`}
+                            className={`w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-blue-500 rounded px-2 py-1 text-xs font-bold transition-colors focus:outline-none ${isExcluded ? 'text-slate-400 line-through' : 'text-slate-900'
+                              }`}
                             title="Auto-saves on blur to Firestore & Google Sheet"
                           />
                         </td>
@@ -956,13 +939,12 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
                                 handleItemLocalChange(item.id, 'inclusionStatus', e.target.value);
                                 handleAutoSaveItemField(item.id, 'inclusionStatus', e.target.value);
                               }}
-                              className={`px-2 py-1 rounded text-[11px] font-bold border transition-colors cursor-pointer focus:outline-none ${
-                                item.inclusionStatus === 'included'
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                  : item.inclusionStatus === 'allowance'
+                              className={`px-2 py-1 rounded text-[11px] font-bold border transition-colors cursor-pointer focus:outline-none ${item.inclusionStatus === 'included'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                : item.inclusionStatus === 'allowance'
                                   ? 'bg-blue-50 text-blue-800 border-blue-300'
                                   : 'bg-slate-100 text-slate-500 border-slate-300'
-                              }`}
+                                }`}
                               title="Auto-saves on selection change"
                             >
                               <option value="included">Included</option>
@@ -996,14 +978,14 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
                         </td>
 
                         {/* 6. Column: VENDOR SCOPE NOTES (Inline onBlur Auto-Save) */}
-                        <td className="py-2 px-3 align-middle">
-                          <input
-                            type="text"
+                        <td className="py-2 px-3 align-top">
+                          <textarea
+                            rows={2}
                             value={item.notes || ''}
                             onChange={(e) => handleItemLocalChange(item.id, 'notes', e.target.value)}
                             onBlur={(e) => handleAutoSaveItemField(item.id, 'notes', e.target.value)}
                             placeholder="Vendor scope notes & allowances..."
-                            className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-blue-500 rounded px-2 py-1 text-[11px] text-slate-700 focus:outline-none transition-colors"
+                            className="w-full min-w-[220px] bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-blue-500 rounded px-2 py-1.5 text-[11px] text-slate-700 focus:outline-none whitespace-normal break-words resize-y leading-relaxed"
                             title="Auto-saves on blur to Firestore & Google Sheet"
                           />
                         </td>

@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  X, 
-  Plus, 
-  DollarSign, 
-  Users, 
-  Paperclip, 
-  Building2, 
-  Trash2, 
+import {
+  X,
+  Plus,
+  DollarSign,
+  Users,
+  Paperclip,
+  Building2,
+  Trash2,
   RotateCcw,
   Calculator,
   Layers,
@@ -27,23 +27,26 @@ import { ContractorCombobox } from './ContractorCombobox';
 import { collection, addDoc, doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { dbService } from '../services/databaseService';
-import { 
+import { getFirestore, collection, getDocs, deleteDoc, doc } from 'firebase/firestore';
+import {
   uploadQuoteDocument,
-  uploadLocalQuoteFile, 
-  openDocumentInNewTab, 
-  showAppToast, 
+  uploadLocalQuoteFile,
+  openDocumentInNewTab,
+  showAppToast,
   isValidPermanentUrl,
-  MAX_FILE_SIZE_BYTES 
+  MAX_FILE_SIZE_BYTES
 } from '../services/fileUploadService';
 
 const sanitizePayload = (obj: any) => JSON.parse(JSON.stringify(obj, (_key, val) => (val === undefined ? null : val)));
 
 interface TradeModalProps {
   isOpen: boolean;
-  scope: ScopeLineItem | null;
+  scope: ScopeLineItem;
   contacts: Contact[];
   projectName?: string;
   projectId?: string;
+  trade?: TradeEntry | null;       // <--- Add this
+  tradeToEdit?: TradeEntry | null; // <--- Add this
   onClose: () => void;
   onSaveTrade?: (trade: TradeEntry) => void;
 }
@@ -57,16 +60,19 @@ interface EditableLineItemInput {
   notes?: string;
   tenderSpecRef?: string;
 }
-
 export const TradeModal: React.FC<TradeModalProps> = ({
   isOpen,
   scope,
   contacts,
   projectName,
   projectId,
+  trade: propTrade,
+  tradeToEdit,
   onClose,
   onSaveTrade,
 }) => {
+  const trade = propTrade || tradeToEdit || null;
+
   const [selectedContactId, setSelectedContactId] = useState<string>('');
   const [customName, setCustomName] = useState('');
   const [customCompany, setCustomCompany] = useState('');
@@ -323,7 +329,7 @@ export const TradeModal: React.FC<TradeModalProps> = ({
       });
     }
 
-    const notes: NoteItem[] = [];
+    const notes: NoteItem[] = trade?.notes ? [...trade.notes] : [];
     if (initialNote.trim()) {
       notes.push({
         id: `n-${Date.now()}`,
@@ -363,6 +369,8 @@ export const TradeModal: React.FC<TradeModalProps> = ({
     const activeUserEmail = dbService.getActiveUserEmail();
 
     const newQuote = {
+      id: trade?.id || undefined, // Reuses existing trade/quote ID for revisions
+      scopeId: scope?.id || '',   // <-- CRITICAL: Permanently binds quote to this exact scope
       projectId: effectiveProjectId,
       projectName: effectiveProjectName,
       trade: finalTrade,
@@ -377,11 +385,12 @@ export const TradeModal: React.FC<TradeModalProps> = ({
       quotedFigure: liveQuotedTotal,
       enteredAmount: liveQuotedTotal,
       amount: liveQuotedTotal,
-      submittedAt: submittedTime,
+      submittedAt: trade?.submittedAt || submittedTime,
+      revisionNumber: ((trade as any)?.revisionNumber || 1) + (trade ? 1 : 0),
       docUrl: finalDocUrl || null,
       attachedDocs: attachedDocs,
       notes: initialNote.trim() || '',
-      status: 'Pending Review',
+      status: trade?.status || 'Pending Review',
       actionItemStatus: actionStatus || 'Estimate Submitted',
       actionStatus: actionStatus || 'Estimate Submitted',
       quoteBreakdown: quoteBreakdownItems,
@@ -390,14 +399,26 @@ export const TradeModal: React.FC<TradeModalProps> = ({
     };
 
     try {
-      const docRef = await addDoc(collection(db, "quotes"), sanitizePayload(newQuote));
-      showAppToast(`Quote saved live to Firestore: ${companyName} ($${liveQuotedTotal.toLocaleString()})`);
+      // 1. Determine if this is a quote revision or a brand new submission
+      let finalDocId = (trade as any)?.quoteDocId || trade?.id;
 
+      if (finalDocId) {
+        // REVISION: Overwrite existing quote in Firestore using merge
+        await setDoc(doc(db, 'quotes', finalDocId), sanitizePayload(newQuote), { merge: true });
+        showAppToast(`Quote updated live in Firestore: ${companyName} ($${liveQuotedTotal.toLocaleString()})`);
+      } else {
+        // NEW QUOTE: Create new document in Firestore
+        const docRef = await addDoc(collection(db, 'quotes'), sanitizePayload(newQuote));
+        finalDocId = docRef.id;
+        showAppToast(`Quote saved live to Firestore: ${companyName} ($${liveQuotedTotal.toLocaleString()})`);
+      }
+
+      // 2. Sync to parent state with the confirmed document ID
       if (onSaveTrade) {
         onSaveTrade({
-          id: docRef.id,
-          quoteDocId: docRef.id,
-          scopeId: scope.id,
+          id: finalDocId,
+          quoteDocId: finalDocId,
+          scopeId: scope?.id || '',
           contactId: selectedContactId || undefined,
           contractorName: contractorName || companyName,
           companyName: companyName,
@@ -409,16 +430,16 @@ export const TradeModal: React.FC<TradeModalProps> = ({
           attachedDocs: attachedDocs,
           docUrl: finalDocUrl || undefined,
           actionStatus: actionStatus || 'Estimate Submitted',
-          poSent: poSent,
+          posent: poSent,
           isAwarded: isAwarded,
           notes: notes,
           quoteBreakdown: quoteBreakdownItems,
           costCode: finalCostCode
         });
       }
-    } catch (err) {
-      console.error('[Firestore] Error adding quote to collection:', err);
-      showAppToast(`Notice saving quote: ${err instanceof Error ? err.message : String(err)}`);
+    } catch (err: any) {
+      console.error('[Firestore] Error saving quote:', err);
+      showAppToast(`Notice saving quote: ${err?.message || String(err)}`);
     }
 
     onClose();
@@ -427,7 +448,7 @@ export const TradeModal: React.FC<TradeModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 md:p-6 animate-in fade-in duration-150">
       <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
-        
+
         {/* ================= MODAL HEADER ================= */}
         <div className="p-4 sm:p-5 bg-slate-900 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -458,7 +479,7 @@ export const TradeModal: React.FC<TradeModalProps> = ({
 
         {/* ================= FORM BODY ================= */}
         <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1 text-xs">
-          
+
           {/* Section: Contractor Selection */}
           <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
             <div className="flex items-center justify-between">
@@ -470,7 +491,7 @@ export const TradeModal: React.FC<TradeModalProps> = ({
             </div>
 
             <div>
-              <ContractorCombobox 
+              <ContractorCombobox
                 contacts={contacts}
                 onSelect={handleContactSelect}
                 selectedContactId={selectedContactId}
@@ -506,7 +527,7 @@ export const TradeModal: React.FC<TradeModalProps> = ({
                   className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
                 />
               </div>
-              
+
               <div>
                 <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Email Address</label>
                 <input
@@ -520,7 +541,7 @@ export const TradeModal: React.FC<TradeModalProps> = ({
                   className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
                 />
               </div>
-              
+
               <div>
                 <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Phone Number</label>
                 <input
@@ -652,9 +673,8 @@ export const TradeModal: React.FC<TradeModalProps> = ({
                   return (
                     <div
                       key={item.id}
-                      className={`p-3 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                        isExcluded ? 'bg-slate-50/70 opacity-60' : 'hover:bg-slate-50/50'
-                      }`}
+                      className={`p-3 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${isExcluded ? 'bg-slate-50/70 opacity-60' : 'hover:bg-slate-50/50'
+                        }`}
                     >
                       {/* Left: Item # + Cost Code Badge + Item Description */}
                       <div className="flex items-start gap-2.5 flex-1 min-w-0">
@@ -684,11 +704,10 @@ export const TradeModal: React.FC<TradeModalProps> = ({
                         <button
                           type="button"
                           onClick={() => handleToggleInclusion(item.id)}
-                          className={`px-2 py-1 rounded text-[10px] font-bold uppercase transition-colors cursor-pointer border ${
-                            item.inclusionStatus === 'included'
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                              : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200 line-through'
-                          }`}
+                          className={`px-2 py-1 rounded text-[10px] font-bold uppercase transition-colors cursor-pointer border ${item.inclusionStatus === 'included'
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                            : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200 line-through'
+                            }`}
                           title="Click to toggle Included / Excluded from live sum"
                         >
                           {item.inclusionStatus === 'excluded' && <Ban className="w-2.5 h-2.5 inline mr-1" />}
@@ -705,11 +724,10 @@ export const TradeModal: React.FC<TradeModalProps> = ({
                             value={item.amount}
                             onChange={(e) => handleLineItemAmountChange(item.id, e.target.value)}
                             disabled={isExcluded}
-                            className={`w-full pl-6 pr-2.5 py-1.5 rounded-lg text-right font-mono font-bold text-xs border focus:outline-none transition-all shadow-2xs ${
-                              isExcluded
-                                ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
-                                : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
-                            }`}
+                            className={`w-full pl-6 pr-2.5 py-1.5 rounded-lg text-right font-mono font-bold text-xs border focus:outline-none transition-all shadow-2xs ${isExcluded
+                              ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                              : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
+                              }`}
                           />
                         </div>
 
@@ -771,11 +789,10 @@ export const TradeModal: React.FC<TradeModalProps> = ({
                 <span className="text-[10px] text-slate-400">Budget: {formatCurrency(scopeBudget)}</span>
               </div>
 
-              <div className={`w-full px-3.5 py-2.5 rounded-xl border flex items-center justify-between ${
-                isUnderBudget
-                  ? 'bg-emerald-950/50 border-emerald-600/40 text-emerald-300'
-                  : 'bg-rose-950/50 border-rose-600/40 text-rose-300'
-              }`}>
+              <div className={`w-full px-3.5 py-2.5 rounded-xl border flex items-center justify-between ${isUnderBudget
+                ? 'bg-emerald-950/50 border-emerald-600/40 text-emerald-300'
+                : 'bg-rose-950/50 border-rose-600/40 text-rose-300'
+                }`}>
                 <div className="flex items-center gap-2">
                   {isUnderBudget ? (
                     <TrendingDown className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -848,7 +865,7 @@ export const TradeModal: React.FC<TradeModalProps> = ({
                 <Paperclip className="w-3.5 h-3.5 text-blue-600" />
                 <span>Attached Document (Local File)</span>
               </div>
-              <span className="text-[10px] text-slate-400 font-mono">Max 5MB • PDF, DOC, DOCX, PNG, JPG</span>
+              <span className="text-[10px] text-slate-400 font-mono">Max 10MB • PDF, DOC, DOCX, PNG, JPG</span>
             </div>
 
             {uploadError && (

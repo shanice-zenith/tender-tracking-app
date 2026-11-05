@@ -3,13 +3,13 @@ import { X, FileText, ExternalLink, Trash2, UploadCloud, Link as LinkIcon, Loade
 import { TradeEntry, AttachedDoc } from '../types';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { 
+import {
   uploadQuoteDocument,
-  openDocumentInNewTab, 
-  showAppToast, 
+  openDocumentInNewTab,
+  showAppToast,
   isDocExpired,
   isValidPermanentUrl,
-  MAX_FILE_SIZE_BYTES 
+  MAX_FILE_SIZE_BYTES
 } from '../services/fileUploadService';
 
 interface DocViewerModalProps {
@@ -45,7 +45,7 @@ export const DocViewerModal: React.FC<DocViewerModalProps> = ({
     setUploadError('');
 
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      const msg = `File too large (${(file.size / (1024 * 1024)).toFixed(1)}MB). Please select a file under 5MB.`;
+      const msg = `File too large (${(file.size / (1024 * 1024)).toFixed(1)}MB). Maximum allowed size is 10MB.`;
       setUploadError(msg);
       showAppToast(msg);
       alert("Attachment upload failed: " + msg);
@@ -85,7 +85,7 @@ export const DocViewerModal: React.FC<DocViewerModalProps> = ({
             docUrl: newDoc.url,
             updatedAt: new Date().toISOString()
           });
-        } catch (_) {}
+        } catch (_) { }
       }
 
       showAppToast(`Attached "${file.name}" to quote.`);
@@ -255,11 +255,10 @@ export const DocViewerModal: React.FC<DocViewerModalProps> = ({
                 setActiveTab('upload');
                 setUploadError('');
               }}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'upload'
+              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === 'upload'
                   ? 'bg-white text-blue-700 shadow-xs border border-slate-200'
                   : 'text-slate-600 hover:text-slate-900'
-              }`}
+                }`}
             >
               <span>📁 Upload File</span>
             </button>
@@ -269,11 +268,10 @@ export const DocViewerModal: React.FC<DocViewerModalProps> = ({
                 setActiveTab('link');
                 setUploadError('');
               }}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'link'
+              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === 'link'
                   ? 'bg-white text-blue-700 shadow-xs border border-slate-200'
                   : 'text-slate-600 hover:text-slate-900'
-              }`}
+                }`}
             >
               <span>🔗 Insert Web Link</span>
             </button>
@@ -291,7 +289,7 @@ export const DocViewerModal: React.FC<DocViewerModalProps> = ({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-                  File Document Upload (Max 5MB)
+                  File Document Upload (Max 10MB)
                 </label>
                 <div className="flex items-center gap-1.5">
                   <label className="text-[10px] text-slate-500 font-medium">Type:</label>
@@ -328,7 +326,7 @@ export const DocViewerModal: React.FC<DocViewerModalProps> = ({
                   <span className="text-xs font-medium text-slate-700 text-center">
                     <span className="font-bold text-blue-600">Drag & drop</span> document here or click to browse
                   </span>
-                  <span className="text-[10px] text-slate-400 mt-1 font-mono">Max 5MB • PDF, PNG, JPG, DOC, DOCX</span>
+                  <span className="text-[10px] text-slate-400 mt-1 font-mono">Max 10MB • PDF, PNG, JPG, DOC, DOCX</span>
                 </div>
               )}
             </div>
@@ -429,31 +427,28 @@ export const DocViewerModal: React.FC<DocViewerModalProps> = ({
                   return (
                     <div
                       key={doc.id}
-                      className={`p-3 bg-white border rounded-xl flex items-center justify-between gap-3 shadow-2xs transition-colors ${
-                        expired ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200 hover:border-slate-300'
-                      }`}
+                      className={`p-3 bg-white border rounded-xl flex items-center justify-between gap-3 shadow-2xs transition-colors ${expired ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200 hover:border-slate-300'
+                        }`}
                     >
                       <div className="flex items-center gap-2.5 truncate">
-                        <div className={`p-2 rounded-lg shrink-0 ${
-                          expired 
-                            ? 'bg-amber-100 text-amber-700' 
-                            : isWebLink 
-                              ? 'bg-indigo-50 text-indigo-600' 
+                        <div className={`p-2 rounded-lg shrink-0 ${expired
+                            ? 'bg-amber-100 text-amber-700'
+                            : isWebLink
+                              ? 'bg-indigo-50 text-indigo-600'
                               : 'bg-blue-50 text-blue-600'
-                        }`}>
+                          }`}>
                           {isWebLink ? <Globe className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
                         </div>
                         <div className="truncate">
                           <button
                             type="button"
                             onClick={(e) => handleDocClick(doc, e)}
-                            className={`font-bold hover:underline inline-flex items-center gap-1.5 truncate text-xs text-left cursor-pointer ${
-                              expired
+                            className={`font-bold hover:underline inline-flex items-center gap-1.5 truncate text-xs text-left cursor-pointer ${expired
                                 ? 'text-amber-700 hover:text-amber-900'
                                 : isWebLink
                                   ? 'text-indigo-900 hover:text-indigo-600'
                                   : 'text-slate-900 hover:text-blue-600'
-                            }`}
+                              }`}
                           >
                             <span className="truncate">{doc.name}</span>
                             {expired ? (
