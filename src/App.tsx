@@ -117,6 +117,7 @@ import {
   deleteScheduledJob,
   syncScheduledDispatchesToBackend
 } from './services/scheduleQueueService';
+import { div } from 'motion/react-client';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<GoogleUserProfile | null>(() => googleAuthService.getCurrentUser());
@@ -2947,6 +2948,32 @@ export default function App() {
         isAllCollapsed={areAllScopesCollapsed}
         onToggleCollapseAll={handleToggleCollapseAllScopes}
       />
+
+      {/* TOP Phase Navigation Bar */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-1 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={handlePrevPhase}
+          className="inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg shadow-2xs transition-all cursor-pointer"
+        >
+          <ChevronLeft className="w-4 h-4 text-slate-500" />
+          <span>Previous Phase</span>
+        </button>
+
+        <span className="text-xs font-bold text-slate-500 tracking-wider uppercase">
+          Phase Navigation
+        </span>
+
+        <button
+          type="button"
+          onClick={handleNextPhase}
+          className="inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-2xs transition-all cursor-pointer"
+        >
+          <span>Next Phase</span>
+          <ChevronRight className="w-4 h-4 text-white" />
+        </button>
+      </div>
+
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div className="mb-6 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -2957,168 +2984,142 @@ export default function App() {
               <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
                 {currentPhaseInfo.name} Scope &amp; Tender Packages
               </h2>
-              <div className="flex items-center gap-2.5">
-                {/* ⬅️ Previous Phase Arrow */}
-                <button
-                  type="button"
-                  onClick={handlePrevPhase}
-                  className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors cursor-pointer shadow-2xs"
-                  title="Previous Phase"
-                >
-                  <ChevronLeft className="w-5 h-5" />
-                </button>
-
-                <span className={`px-2.5 py-1 text-xs font-extrabold text-white rounded-lg ${isCurrentPhaseArchived ? 'bg-amber-600' : 'bg-blue-600'}`}>
-                  {currentPhaseInfo.code}
+              {isCurrentPhaseArchived && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
+                  <Archive className="w-3 h-3 text-amber-700" />
+                  Archived / Completed
                 </span>
-                <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
-                  {currentPhaseInfo.name} Scope &amp; Tender Packages
-                </h2>
-
-                {/* ➡️ Next Phase Arrow */}
-                <button
-                  type="button"
-                  onClick={handleNextPhase}
-                  className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors cursor-pointer shadow-2xs"
-                  title="Next Phase"
-                >
-                  <ChevronRight className="w-5 h-5" />
-                </button>
-                {isCurrentPhaseArchived && (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
-                    <Archive className="w-3 h-3 text-amber-700" />
-                    Archived / Completed
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-600 mt-1 max-w-2xl">
-                {currentPhaseInfo.description}
-              </p>
+              )}
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
-                <span className="block text-[10px] uppercase font-bold text-slate-400">Phase Progress</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-base font-extrabold text-slate-900">{phaseProgress}%</span>
-                  <span className="text-[11px] text-slate-500">
-                    ({phaseBudgetMetrics.poSentCount}/{phaseBudgetMetrics.totalScopesCount} POs)
-                  </span>
-                </div>
-              </div>
-              <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
-                <span className="block text-[10px] uppercase font-bold text-slate-400">Allocated Budget</span>
-                <span className="text-base font-extrabold text-slate-900 font-mono">
-                  {formatCurrency(phaseBudgetMetrics.totalBudget)}
-                </span>
-              </div>
-              <div className="relative" ref={phaseActionsMenuRef}>
-                <button
-                  type="button"
-                  id="phase-actions-menu-btn"
-                  onClick={() => setIsPhaseActionsMenuOpen(!isPhaseActionsMenuOpen)}
-                  className="p-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-colors cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  title="Phase Actions &amp; CSV Tools"
-                  aria-label="More phase actions"
-                  aria-expanded={isPhaseActionsMenuOpen}
-                >
-                  <MoreVertical className="w-4 h-4" />
-                </button>
-                {isPhaseActionsMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-800">
-                    <div className="py-1">
-                      <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
-                        Phase Management ({currentPhaseInfo.code})
-                      </div>
-                      <button
-                        type="button"
-                        id="phase-menu-archive-btn"
-                        onClick={() => {
-                          setIsPhaseActionsMenuOpen(false);
-                          handleToggleArchivePhase(activePhase);
-                        }}
-                        className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                      >
-                        <Archive className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>
-                          {isCurrentPhaseArchived
-                            ? 'Mark Phase as Active (Unarchive)'
-                            : 'Archive / Mark as Completed'}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        id="phase-menu-delete-btn"
-                        onClick={() => {
-                          setIsPhaseActionsMenuOpen(false);
-                          handleRequestDeletePhase(activePhase);
-                        }}
-                        className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
-                        <span>Delete Phase</span>
-                      </button>
-                    </div>
-                    <div className="py-1">
-                      <button
-                        type="button"
-                        id="phase-menu-export-quote-template-btn"
-                        onClick={() => {
-                          setIsPhaseActionsMenuOpen(false);
-                          handleExportPhaseQuoteTemplate();
-                        }}
-                        className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                      >
-                        <Download className="w-4 h-4 text-blue-400 shrink-0" />
-                        <span>Export Phase Quote Template (.CSV)</span>
-                      </button>
-                      <button
-                        type="button"
-                        id="phase-menu-import-quotes-btn"
-                        onClick={() => {
-                          setIsPhaseActionsMenuOpen(false);
-                          phaseFileInputRef.current?.click();
-                        }}
-                        className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-emerald-300 hover:text-emerald-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                      >
-                        <Upload className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>Import Phase Quotes (.CSV)</span>
-                      </button>
-                    </div>
-                    <div className="py-1">
-                      <button
-                        type="button"
-                        id="phase-menu-export-summary-csv-btn"
-                        onClick={() => {
-                          setIsPhaseActionsMenuOpen(false);
-                          handleExportPhaseCsv();
-                        }}
-                        className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                      >
-                        <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>Export Current Phase Summary (.CSV)</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-                <input
-                  ref={phaseFileInputRef}
-                  id="phase-import-quotes-input"
-                  type="file"
-                  accept=".csv,text/csv,text/plain"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      handleImportQuotesFile(file);
-                      e.target.value = '';
-                    }
-                  }}
-                />
-              </div>
+            <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+              {currentPhaseInfo.description}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
+            <span className="block text-[10px] uppercase font-bold text-slate-400">Phase Progress</span>
+            <div className="flex items-center gap-2">
+              <span className="text-base font-extrabold text-slate-900">{phaseProgress}%</span>
+              <span className="text-[11px] text-slate-500">
+                ({phaseBudgetMetrics.poSentCount}/{phaseBudgetMetrics.totalScopesCount} POs)
+              </span>
             </div>
           </div>
+          <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
+            <span className="block text-[10px] uppercase font-bold text-slate-400">Allocated Budget</span>
+            <span className="text-base font-extrabold text-slate-900 font-mono">
+              {formatCurrency(phaseBudgetMetrics.totalBudget)}
+            </span>
+          </div>
+          <div className="relative" ref={phaseActionsMenuRef}>
+            <button
+              type="button"
+              id="phase-actions-menu-btn"
+              onClick={() => setIsPhaseActionsMenuOpen(!isPhaseActionsMenuOpen)}
+              className="p-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-colors cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              title="Phase Actions &amp; CSV Tools"
+              aria-label="More phase actions"
+              aria-expanded={isPhaseActionsMenuOpen}
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
+            {isPhaseActionsMenuOpen && (
+              <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-800">
+                <div className="py-1">
+                  <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+                    Phase Management ({currentPhaseInfo.code})
+                  </div>
+                  <button
+                    type="button"
+                    id="phase-menu-archive-btn"
+                    onClick={() => {
+                      setIsPhaseActionsMenuOpen(false);
+                      handleToggleArchivePhase(activePhase);
+                    }}
+                    className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <Archive className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>
+                      {isCurrentPhaseArchived
+                        ? 'Mark Phase as Active (Unarchive)'
+                        : 'Archive / Mark as Completed'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    id="phase-menu-delete-btn"
+                    onClick={() => {
+                      setIsPhaseActionsMenuOpen(false);
+                      handleRequestDeletePhase(activePhase);
+                    }}
+                    className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>Delete Phase</span>
+                  </button>
+                </div>
+                <div className="py-1">
+                  <button
+                    type="button"
+                    id="phase-menu-export-quote-template-btn"
+                    onClick={() => {
+                      setIsPhaseActionsMenuOpen(false);
+                      handleExportPhaseQuoteTemplate();
+                    }}
+                    className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 text-blue-400 shrink-0" />
+                    <span>Export Phase Quote Template (.CSV)</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="phase-menu-import-quotes-btn"
+                    onClick={() => {
+                      setIsPhaseActionsMenuOpen(false);
+                      phaseFileInputRef.current?.click();
+                    }}
+                    className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-emerald-300 hover:text-emerald-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <Upload className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Import Phase Quotes (.CSV)</span>
+                  </button>
+                </div>
+                <div className="py-1">
+                  <button
+                    type="button"
+                    id="phase-menu-export-summary-csv-btn"
+                    onClick={() => {
+                      setIsPhaseActionsMenuOpen(false);
+                      handleExportPhaseCsv();
+                    }}
+                    className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Export Current Phase Summary (.CSV)</span>
+                  </button>
+                </div>
+              </div>
+            )}
+            <input
+              ref={phaseFileInputRef}
+              id="phase-import-quotes-input"
+              type="file"
+              accept=".csv,text/csv,text/plain"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  handleImportQuotesFile(file);
+                  e.target.value = '';
+                }
+              }}
+            />
+          </div>
+        </div>
 
-          {isCurrentPhaseArchived && (
+        {
+          isCurrentPhaseArchived && (
             <div className="mb-6 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 shadow-xs animate-in fade-in duration-200">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-start gap-3.5">
@@ -3187,9 +3188,11 @@ export default function App() {
                 </div>
               </div>
             </div>
-          )}
+          )
+        }
 
-          {isCurrentPhaseArchived && isArchivedCardsCollapsed ? (
+        {
+          isCurrentPhaseArchived && isArchivedCardsCollapsed ? (
             <div className="bg-white rounded-2xl border border-dashed border-amber-300 p-8 text-center shadow-xs">
               <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-2.5">
                 <Archive className="w-5 h-5" />
@@ -3345,51 +3348,52 @@ export default function App() {
                 />
               ))}
             </div>
-          )}
+          )
+        }
 
-          {/* Bottom Phase Navigation & Clean Status */}
-          <div className="mt-8 pt-4 pb-8 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-            {/* Left: Previous Phase button */}
-            <button
-              type="button"
-              onClick={handlePrevPhase}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-xl shadow-xs transition-all cursor-pointer"
-            >
-              <ChevronLeft className="w-4 h-4 text-slate-500" />
-              <span>Previous Phase</span>
-            </button>
+        {/* Bottom Phase Navigation & Clean Status */}
+        <div className="mt-8 pt-4 pb-8 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+          {/* Left: Previous Phase button */}
+          <button
+            type="button"
+            onClick={handlePrevPhase}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-xl shadow-xs transition-all cursor-pointer"
+          >
+            <ChevronLeft className="w-4 h-4 text-slate-500" />
+            <span>Previous Phase</span>
+          </button>
 
-            {/* Center: Current Phase Badge */}
-            <div className="text-center">
-              <span className="text-xs font-bold text-slate-800 tracking-wide block">
-                {currentPhaseInfo?.name || `Phase ${activePhase}`}
-              </span>
-              <span className="text-[11px] text-slate-400">
-                Showing {currentPhaseScopes?.length || 0} scopes in this phase
-              </span>
-            </div>
-
-            {/* Right: Next Phase button */}
-            <button
-              type="button"
-              onClick={handleNextPhase}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs transition-all cursor-pointer"
-            >
-              <span>Next Phase</span>
-              <ChevronRight className="w-4 h-4 text-white" />
-            </button>
+          {/* Center: Current Phase Badge */}
+          <div className="text-center">
+            <span className="text-xs font-bold text-slate-800 tracking-wide block">
+              {currentPhaseInfo?.name || `Phase ${activePhase}`}
+            </span>
+            <span className="text-[11px] text-slate-400">
+              Showing {currentPhaseScopes?.length || 0} scopes in this phase
+            </span>
           </div>
+
+          {/* Right: Next Phase button */}
+          <button
+            type="button"
+            onClick={handleNextPhase}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs transition-all cursor-pointer"
+          >
+            <span>Next Phase</span>
+            <ChevronRight className="w-4 h-4 text-white" />
+          </button>
         </div>
       </main>
 
       {/* Modals & Drawers */}
-      <ProjectModal
+      < ProjectModal
         isOpen={isProjectModalOpen}
         projectToEdit={projectToEdit}
         onClose={() => {
           setIsProjectModalOpen(false);
           setProjectToEdit(null);
-        }}
+        }
+        }
         onSaveProject={handleSaveProject}
         onDeleteProject={handleDeleteProject}
       />
@@ -3649,61 +3653,63 @@ export default function App() {
       />
 
       {/* Bulk Delete Floating Action Bar */}
-      {selectedQuoteIds.length > 0 && (
-        <div
-          id="bulk-delete-action-bar"
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-3xl bg-slate-900/95 backdrop-blur-md text-white rounded-2xl border border-slate-700 shadow-2xl px-5 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-5 duration-200"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-400 shrink-0">
-              <CheckSquare className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold text-sm text-white tracking-tight">
-                  {selectedQuoteCount} {selectedQuoteCount === 1 ? 'Quote' : 'Quotes'} Selected
-                </span>
-                <span className="text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-full">
-                  Batch Action
-                </span>
+      {
+        selectedQuoteIds.length > 0 && (
+          <div
+            id="bulk-delete-action-bar"
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-3xl bg-slate-900/95 backdrop-blur-md text-white rounded-2xl border border-slate-700 shadow-2xl px-5 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-5 duration-200"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-400 shrink-0">
+                <CheckSquare className="w-4 h-4" />
               </div>
-              <p className="text-[11px] text-slate-400">
-                Manage selection across trade scopes in {activeProject?.name || 'project'}
-              </p>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-extrabold text-sm text-white tracking-tight">
+                    {selectedQuoteCount} {selectedQuoteCount === 1 ? 'Quote' : 'Quotes'} Selected
+                  </span>
+                  <span className="text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-full">
+                    Batch Action
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Manage selection across trade scopes in {activeProject?.name || 'project'}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto justify-end">
+              <button
+                type="button"
+                id="bulk-bar-select-misassigned-btn"
+                onClick={handleSelectAllMisassigned}
+                className="px-3 py-1.5 text-xs font-semibold text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 border border-amber-500/40 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                title="Select all quotes whose cost code does not match their parent scope section"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                <span>Select All Misassigned Quotes</span>
+              </button>
+              <button
+                type="button"
+                id="bulk-bar-clear-selection-btn"
+                onClick={handleClearSelection}
+                className="px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-colors cursor-pointer flex items-center gap-1"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Clear Selection</span>
+              </button>
+              <button
+                type="button"
+                id="bulk-bar-delete-selected-btn"
+                onClick={() => setIsBulkDeleteModalOpen(true)}
+                className="px-4 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 active:bg-rose-700 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-rose-900/30 active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Selected ({selectedQuoteCount})</span>
+              </button>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto justify-end">
-            <button
-              type="button"
-              id="bulk-bar-select-misassigned-btn"
-              onClick={handleSelectAllMisassigned}
-              className="px-3 py-1.5 text-xs font-semibold text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 border border-amber-500/40 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
-              title="Select all quotes whose cost code does not match their parent scope section"
-            >
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-              <span>Select All Misassigned Quotes</span>
-            </button>
-            <button
-              type="button"
-              id="bulk-bar-clear-selection-btn"
-              onClick={handleClearSelection}
-              className="px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-colors cursor-pointer flex items-center gap-1"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>Clear Selection</span>
-            </button>
-            <button
-              type="button"
-              id="bulk-bar-delete-selected-btn"
-              onClick={() => setIsBulkDeleteModalOpen(true)}
-              className="px-4 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 active:bg-rose-700 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-rose-900/30 active:scale-95"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete Selected ({selectedQuoteCount})</span>
-            </button>
-          </div>
-        </div>
-      )}
+        )
+      }
 
       <ConfirmModal
         isOpen={isBulkDeleteModalOpen}
@@ -3716,23 +3722,27 @@ export default function App() {
         onClose={() => !isBulkDeleting && setIsBulkDeleteModalOpen(false)}
       />
 
-      {isExportPoModalOpen && exportPoTargetProject && (
-        <ApprovedPoExportModal
-          isOpen={isExportPoModalOpen}
-          onClose={() => {
-            setIsExportPoModalOpen(false);
-            setExportPoTargetProject(null);
-          }}
-          project={exportPoTargetProject}
-        />
-      )}
+      {
+        isExportPoModalOpen && exportPoTargetProject && (
+          <ApprovedPoExportModal
+            isOpen={isExportPoModalOpen}
+            onClose={() => {
+              setIsExportPoModalOpen(false);
+              setExportPoTargetProject(null);
+            }}
+            project={exportPoTargetProject}
+          />
+        )
+      }
 
-      {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-xl border border-slate-800 text-xs font-semibold flex items-center gap-2 animate-in slide-in-from-bottom-3 duration-200">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
-    </div>
+      {
+        toastMessage && (
+          <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-xl border border-slate-800 text-xs font-semibold flex items-center gap-2 animate-in slide-in-from-bottom-3 duration-200">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <span>{toastMessage}</span>
+          </div>
+        )
+      }
+    </div >
   );
 }
