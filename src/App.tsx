@@ -2983,7 +2983,9 @@ export default function App() {
       </div>
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="mb-6 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* Phase Header Card */}
+        <div className="mb-6 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          {/* Left: Phase Title, Code & Description */}
           <div>
             <div className="flex items-center gap-2.5">
               <span className={`px-2.5 py-1 text-xs font-extrabold text-white rounded-lg ${isCurrentPhaseArchived ? 'bg-amber-600' : 'bg-blue-600'}`}>
@@ -3003,126 +3005,132 @@ export default function App() {
               {currentPhaseInfo.description}
             </p>
           </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
-            <span className="block text-[10px] uppercase font-bold text-slate-400">Phase Progress</span>
-            <div className="flex items-center gap-2">
-              <span className="text-base font-extrabold text-slate-900">{phaseProgress}%</span>
-              <span className="text-[11px] text-slate-500">
-                ({phaseBudgetMetrics.poSentCount}/{phaseBudgetMetrics.totalScopesCount} POs)
+
+          {/* Right: Phase Progress, Allocated Budget & 3-Dot Menu on the same line */}
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
+              <span className="block text-[10px] uppercase font-bold text-slate-400">Phase Progress</span>
+              <div className="flex items-center gap-2">
+                <span className="text-base font-extrabold text-slate-900">{phaseProgress}%</span>
+                <span className="text-[11px] text-slate-500">
+                  ({phaseBudgetMetrics.poSentCount}/{phaseBudgetMetrics.totalScopesCount} POs)
+                </span>
+              </div>
+            </div>
+
+            <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
+              <span className="block text-[10px] uppercase font-bold text-slate-400">Allocated Budget</span>
+              <span className="text-base font-extrabold text-slate-900 font-mono">
+                {formatCurrency(phaseBudgetMetrics.totalBudget)}
               </span>
             </div>
-          </div>
-          <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-right">
-            <span className="block text-[10px] uppercase font-bold text-slate-400">Allocated Budget</span>
-            <span className="text-base font-extrabold text-slate-900 font-mono">
-              {formatCurrency(phaseBudgetMetrics.totalBudget)}
-            </span>
-          </div>
-          <div className="relative" ref={phaseActionsMenuRef}>
-            <button
-              type="button"
-              id="phase-actions-menu-btn"
-              onClick={() => setIsPhaseActionsMenuOpen(!isPhaseActionsMenuOpen)}
-              className="p-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-colors cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-              title="Phase Actions &amp; CSV Tools"
-              aria-label="More phase actions"
-              aria-expanded={isPhaseActionsMenuOpen}
-            >
-              <MoreVertical className="w-4 h-4" />
-            </button>
-            {isPhaseActionsMenuOpen && (
-              <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-800">
-                <div className="py-1">
-                  <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
-                    Phase Management ({currentPhaseInfo.code})
+
+            <div className="relative" ref={phaseActionsMenuRef}>
+              <button
+                type="button"
+                id="phase-actions-menu-btn"
+                onClick={() => setIsPhaseActionsMenuOpen(!isPhaseActionsMenuOpen)}
+                className="p-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-colors cursor-pointer shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                title="Phase Actions &amp; CSV Tools"
+                aria-label="More phase actions"
+                aria-expanded={isPhaseActionsMenuOpen}
+              >
+                <MoreVertical className="w-4 h-4" />
+              </button>
+
+              {isPhaseActionsMenuOpen && (
+                <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-800">
+                  <div className="py-1">
+                    <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+                      Phase Management ({currentPhaseInfo.code})
+                    </div>
+                    <button
+                      type="button"
+                      id="phase-menu-archive-btn"
+                      onClick={() => {
+                        setIsPhaseActionsMenuOpen(false);
+                        handleToggleArchivePhase(activePhase);
+                      }}
+                      className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                    >
+                      <Archive className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>
+                        {isCurrentPhaseArchived
+                          ? 'Mark Phase as Active (Unarchive)'
+                          : 'Archive / Mark as Completed'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      id="phase-menu-delete-btn"
+                      onClick={() => {
+                        setIsPhaseActionsMenuOpen(false);
+                        handleRequestDeletePhase(activePhase);
+                      }}
+                      className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>Delete Phase</span>
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    id="phase-menu-archive-btn"
-                    onClick={() => {
-                      setIsPhaseActionsMenuOpen(false);
-                      handleToggleArchivePhase(activePhase);
-                    }}
-                    className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                  >
-                    <Archive className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>
-                      {isCurrentPhaseArchived
-                        ? 'Mark Phase as Active (Unarchive)'
-                        : 'Archive / Mark as Completed'}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    id="phase-menu-delete-btn"
-                    onClick={() => {
-                      setIsPhaseActionsMenuOpen(false);
-                      handleRequestDeletePhase(activePhase);
-                    }}
-                    className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
-                    <span>Delete Phase</span>
-                  </button>
+                  <div className="py-1">
+                    <button
+                      type="button"
+                      id="phase-menu-export-quote-template-btn"
+                      onClick={() => {
+                        setIsPhaseActionsMenuOpen(false);
+                        handleExportPhaseQuoteTemplate();
+                      }}
+                      className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                    >
+                      <Download className="w-4 h-4 text-blue-400 shrink-0" />
+                      <span>Export Phase Quote Template (.CSV)</span>
+                    </button>
+                    <button
+                      type="button"
+                      id="phase-menu-import-quotes-btn"
+                      onClick={() => {
+                        setIsPhaseActionsMenuOpen(false);
+                        phaseFileInputRef.current?.click();
+                      }}
+                      className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-emerald-300 hover:text-emerald-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                    >
+                      <Upload className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Import Phase Quotes (.CSV)</span>
+                    </button>
+                  </div>
+                  <div className="py-1">
+                    <button
+                      type="button"
+                      id="phase-menu-export-summary-csv-btn"
+                      onClick={() => {
+                        setIsPhaseActionsMenuOpen(false);
+                        handleExportPhaseCsv();
+                      }}
+                      className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                    >
+                      <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Export Current Phase Summary (.CSV)</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="py-1">
-                  <button
-                    type="button"
-                    id="phase-menu-export-quote-template-btn"
-                    onClick={() => {
-                      setIsPhaseActionsMenuOpen(false);
-                      handleExportPhaseQuoteTemplate();
-                    }}
-                    className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                  >
-                    <Download className="w-4 h-4 text-blue-400 shrink-0" />
-                    <span>Export Phase Quote Template (.CSV)</span>
-                  </button>
-                  <button
-                    type="button"
-                    id="phase-menu-import-quotes-btn"
-                    onClick={() => {
-                      setIsPhaseActionsMenuOpen(false);
-                      phaseFileInputRef.current?.click();
-                    }}
-                    className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-emerald-300 hover:text-emerald-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                  >
-                    <Upload className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Import Phase Quotes (.CSV)</span>
-                  </button>
-                </div>
-                <div className="py-1">
-                  <button
-                    type="button"
-                    id="phase-menu-export-summary-csv-btn"
-                    onClick={() => {
-                      setIsPhaseActionsMenuOpen(false);
-                      handleExportPhaseCsv();
-                    }}
-                    className="w-full text-left flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                  >
-                    <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>Export Current Phase Summary (.CSV)</span>
-                  </button>
-                </div>
-              </div>
-            )}
-            <input
-              ref={phaseFileInputRef}
-              id="phase-import-quotes-input"
-              type="file"
-              accept=".csv,text/csv,text/plain"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  handleImportQuotesFile(file);
-                  e.target.value = '';
-                }
-              }}
-            />
+              )}
+
+              <input
+                ref={phaseFileInputRef}
+                id="phase-import-quotes-input"
+                type="file"
+                accept=".csv,text/csv,text/plain"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    handleImportQuotesFile(file);
+                    e.target.value = '';
+                  }
+                }}
+              />
+            </div>
           </div>
         </div>
 
