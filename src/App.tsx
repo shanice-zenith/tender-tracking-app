@@ -2949,25 +2949,33 @@ export default function App() {
         onToggleCollapseAll={handleToggleCollapseAllScopes}
       />
 
-      {/* TOP Phase Navigation Bar */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-1 flex items-center justify-between">
+      {/* Top Phase Navigation Bar */}
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-2 flex flex-col sm:flex-row items-center justify-between gap-4">
+        {/* Left: Previous Phase button */}
         <button
           type="button"
           onClick={handlePrevPhase}
-          className="inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg shadow-2xs transition-all cursor-pointer"
+          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-xl shadow-xs transition-all cursor-pointer"
         >
           <ChevronLeft className="w-4 h-4 text-slate-500" />
           <span>Previous Phase</span>
         </button>
 
-        <span className="text-xs font-bold text-slate-500 tracking-wider uppercase">
-          Phase Navigation
-        </span>
+        {/* Center: Current Phase Badge & Scope Count */}
+        <div className="text-center">
+          <span className="text-xs font-bold text-slate-800 tracking-wide block">
+            {currentPhaseInfo?.name || `Phase ${activePhase}`}
+          </span>
+          <span className="text-[11px] text-slate-400">
+            Showing {currentPhaseScopes?.length || 0} scopes in this phase
+          </span>
+        </div>
 
+        {/* Right: Next Phase button */}
         <button
           type="button"
           onClick={handleNextPhase}
-          className="inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-2xs transition-all cursor-pointer"
+          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs transition-all cursor-pointer"
         >
           <span>Next Phase</span>
           <ChevronRight className="w-4 h-4 text-white" />
