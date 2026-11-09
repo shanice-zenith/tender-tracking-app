@@ -461,7 +461,235 @@ export default function App() {
       `Successfully created ${validRows.length} project workspace(s) with 5-phase baseline budgets.`
     );
   };
+  // Export Master Tender Sync Submissions Template
+  const handleExportSubmissionsTemplate = () => {
+    const headers = [
+      'Company Name',
+      'Project Name',
+      'Tender Form Item',
+      'Cost Code',
+      'Entered Amount ($)',
+      'Notes / Exclusions',
+      'Formal Quote Link',
+      'Action Status',
+      'PO Sent'
+    ];
+    const sampleRows = [
+      [
+        '"Jeff Macdonald"',
+        '"1915 Ramsay St. SE"',
+        '"Interior Stairs (Excl. GST)"',
+        '"20330"',
+        '"2950.25"',
+        '"Install of stairs"',
+        '""',
+        '"PO Approved"',
+        '"Yes"'
+      ],
+      [
+        '"Precision Underground Services"',
+        '"Glenbrook 44"',
+        '"Total for Water & Underground (excl. GST)"',
+        '"20120"',
+        '"44500.00"',
+        '"Water & sewer tie-in"',
+        '""',
+        '"PO Approved"',
+        '"Yes"'
+      ]
+    ];
+    const csv = [headers.join(','), ...sampleRows.map((r) => r.join(','))].join('\n');
+    bulkImportExportService.downloadCsv(`Master_Tender_Sync_Submissions_Template.csv`, csv);
+    showToast('Submissions CSV Template downloaded.');
+  };
 
+  // Import Submissions & Purchase Orders from Master Tender Sync CSV
+  const handleImportSubmissionsFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const text = (evt.target?.result as string) || '';
+      if (!text.trim()) {
+        showToast('Uploaded CSV file is empty.');
+        return;
+      }
+
+      setIsSyncing(true);
+      showToast('Importing submissions and Purchase Orders...');
+
+      try {
+        const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        if (lines.length <= 1) {
+          showToast('No data rows found in CSV.');
+          setIsSyncing(false);
+          return;
+        }
+
+        const delimiter = lines[0].includes('\t') ? '\t' : ',';
+        const headers = sheetsSyncService.parseCsvLine(lines[0], delimiter).map((h) =>
+          h.toLowerCase().replace(/['"]/g, '').trim()
+        );
+
+        // Detect column positions matching your Master Tender Sync file
+        const compIdx = headers.findIndex((h) => h.includes('company') || h.includes('contractor') || h.includes('vendor'));
+        const prjIdx = headers.findIndex((h) => h.includes('project'));
+        const itemIdx = headers.findIndex((h) => h.includes('item') || h.includes('scope') || h.includes('trade'));
+        const codeIdx = headers.findIndex((h) => h.includes('cost code') || h.includes('code'));
+        const amtIdx = headers.findIndex((h) => h.includes('amount') || h.includes('figure') || h.includes('price') || h.includes('entered'));
+        const notesIdx = headers.findIndex((h) => h.includes('note') || h.includes('exclusion'));
+        const linkIdx = headers.findIndex((h) => h.includes('link') || h.includes('doc') || h.includes('quote'));
+        const statusIdx = headers.findIndex((h) => h.includes('status'));
+        const poIdx = headers.findIndex((h) => h.includes('po'));
+
+        let updatedProjectsList = [...projects];
+        let newContactsList = [...contacts];
+        let importedCount = 0;
+
+        for (let i = 1; i < lines.length; i++) {
+          const cols = sheetsSyncService.parseCsvLine(lines[i], delimiter);
+          if (cols.length === 0 || cols.every((c) => !c)) continue;
+
+          const company = (compIdx >= 0 ? cols[compIdx] : cols[0] || '').replace(/['"]/g, '').trim();
+          const rawProject = (prjIdx >= 0 ? cols[prjIdx] : cols[1] || '').replace(/['"]/g, '').trim();
+          const tenderItem = (itemIdx >= 0 ? cols[itemIdx] : cols[2] || '').replace(/['"]/g, '').trim();
+          const costCode = (codeIdx >= 0 ? cols[codeIdx] : cols[3] || '').replace(/['"]/g, '').trim();
+          const rawAmt = (amtIdx >= 0 ? cols[amtIdx] : cols[4] || '0').replace(/['"$,]/g, '').trim();
+          const amount = parseFloat(rawAmt) || 0;
+          const notesText = (notesIdx >= 0 ? cols[notesIdx] : cols[5] || '').replace(/['"]/g, '').trim();
+          const docUrl = (linkIdx >= 0 ? cols[linkIdx] : cols[6] || '').replace(/['"]/g, '').trim();
+          const rawStatus = (statusIdx >= 0 ? cols[statusIdx] : '').replace(/['"]/g, '').trim();
+          const rawPo = (poIdx >= 0 ? cols[poIdx] : '').replace(/['"]/g, '').trim().toLowerCase();
+
+          if (!company || !rawProject) continue;
+
+          const matchedProjCandidate = matchProjectCandidate(rawProject);
+          const targetProjIndex = updatedProjectsList.findIndex((p) =>
+            p.id === matchedProjCandidate.projectId ||
+            p.name.toLowerCase().trim() === rawProject.toLowerCase().trim() ||
+            p.name.toLowerCase().includes(rawProject.toLowerCase().trim())
+          );
+
+          if (targetProjIndex === -1) continue;
+
+          const targetProject = { ...updatedProjectsList[targetProjIndex] };
+          const resolvedScope = sheetsSyncService.matchScopeAndPhase(tenderItem, targetProject.scopes, undefined, costCode);
+          let targetScope = resolvedScope.targetScope;
+
+          if (!targetScope) {
+            const newScopeId = `scope-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+            targetScope = {
+              id: newScopeId,
+              phaseId: resolvedScope.targetPhaseId || '1A',
+              name: resolvedScope.suggestedScopeName || tenderItem || 'General Scope',
+              costCode: costCode || '20000',
+              description: `Scope package for ${tenderItem}`,
+              budgetAmount: amount > 0 ? amount : 25000,
+              trades: [],
+              order: targetProject.scopes.length + 1,
+              createdAt: new Date().toISOString()
+            };
+            targetProject.scopes = [...targetProject.scopes, targetScope];
+          }
+
+          const isPoSent = rawPo === 'yes' || rawPo === 'true' || rawPo === '1' || rawStatus.toLowerCase().includes('po approved') || rawStatus.toLowerCase().includes('po sent');
+          const finalStatus: ActionItemStatus = isPoSent ? 'PO Approved' : (rawStatus as ActionItemStatus) || 'Estimate Submitted';
+
+          const tradeIndex = targetScope.trades.findIndex((t) =>
+            t.companyName.trim().toLowerCase() === company.toLowerCase() ||
+            t.contractorName.trim().toLowerCase() === company.toLowerCase()
+          );
+
+          const breakdownItem: QuoteBreakdownItem = {
+            id: `brk-${Date.now()}-${i}`,
+            costCode: costCode || targetScope.costCode || '20000',
+            itemDescription: tenderItem || targetScope.name,
+            amount: amount,
+            inclusionStatus: 'included',
+            notes: notesText
+          };
+
+          const docsList: AttachedDoc[] = docUrl ? [{
+            id: `doc-${Date.now()}-${i}`,
+            name: `${company} Quote Document.pdf`,
+            url: docUrl,
+            type: 'quote',
+            addedAt: new Date().toISOString().split('T')[0]
+          }] : [];
+
+          const tradeNotes: NoteItem[] = notesText ? [{
+            id: `note-${Date.now()}-${i}`,
+            text: notesText,
+            author: 'CSV Import',
+            timestamp: new Date().toISOString()
+          }] : [];
+
+          if (tradeIndex >= 0) {
+            const existingTrade = targetScope.trades[tradeIndex];
+            targetScope.trades[tradeIndex] = {
+              ...existingTrade,
+              quotedFigure: amount > 0 ? amount : existingTrade.quotedFigure,
+              actionStatus: finalStatus,
+              poSent: isPoSent ? true : existingTrade.poSent,
+              isAwarded: isPoSent ? true : existingTrade.isAwarded,
+              notes: notesText ? [...existingTrade.notes, ...tradeNotes] : existingTrade.notes,
+              attachedDocs: docUrl ? [...existingTrade.attachedDocs, ...docsList] : existingTrade.attachedDocs,
+              quoteBreakdown: [breakdownItem]
+            };
+          } else {
+            const newTrade: TradeEntry = {
+              id: `tr-${Date.now()}-${i}`,
+              quoteDocId: `${targetProject.name}_${company}_${costCode || '20000'}`.replace(/\//g, '-'),
+              scopeId: targetScope.id,
+              companyName: company,
+              contractorName: company,
+              category: targetScope.name,
+              currency: 'CAD',
+              quotedFigure: amount,
+              actionStatus: finalStatus,
+              poSent: isPoSent,
+              isAwarded: isPoSent,
+              notes: tradeNotes,
+              attachedDocs: docsList,
+              quoteBreakdown: [breakdownItem]
+            };
+            targetScope.trades = [...targetScope.trades, newTrade];
+          }
+
+          // Automatically record contact in Directory
+          if (!newContactsList.some((c) => c.company.toLowerCase() === company.toLowerCase())) {
+            newContactsList.push({
+              id: `cnt-${Date.now()}-${i}`,
+              name: company,
+              company: company,
+              category: targetScope.name,
+              categories: [targetScope.name],
+              trade_categories: [targetScope.name],
+              phone: '',
+              email: '',
+              createdAt: new Date().toISOString()
+            });
+          }
+
+          targetProject.scopes = targetProject.scopes.map((s) => s.id === targetScope!.id ? targetScope! : s);
+          updatedProjectsList[targetProjIndex] = targetProject;
+          importedCount++;
+        }
+
+        setContacts(newContactsList);
+        storageService.saveContacts(newContactsList);
+        dbService.saveContacts(newContactsList);
+
+        persistProjectsAndSync(
+          updatedProjectsList,
+          `Successfully imported ${importedCount} submission(s) and Purchase Order(s).`
+        );
+      } catch (err: any) {
+        showToast(`Import error: ${err.message || 'Failed to parse CSV file.'}`);
+      } finally {
+        setIsSyncing(false);
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+  };
   const handleExportScopePackagesTemplate = () => {
     if (!activeProject) return;
     const csv = bulkImportExportService.generateScopePackagesTemplate(activeProject);
@@ -2737,8 +2965,8 @@ export default function App() {
           sheetsConfig={sheetsConfig}
           isSyncing={isSyncing}
           pendingScheduledCount={pendingScheduledCount}
-          onSignOut={handleSignOut}
           onSelectProject={handleSelectProject}
+          onSignOut={handleSignOut}
           onOpenCreateProjectModal={() => {
             setProjectToEdit(null);
             setIsProjectModalOpen(true);
@@ -2757,6 +2985,8 @@ export default function App() {
           onLiveSheetsResync={handleLiveSheetsResync}
           onExportProjectTemplate={handleExportProjectsTemplate}
           onImportProjectsCsv={handleImportProjectsFile}
+          onExportSubmissionsTemplate={handleExportSubmissionsTemplate}
+          onImportSubmissionsCsv={handleImportSubmissionsFile}
           onExportApprovedPoPdf={(proj) => handleOpenExportPoModal(proj)}
         />
         {isExportPoModalOpen && exportPoTargetProject && (
