@@ -1,20 +1,20 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { 
-  Building2, 
-  Plus, 
-  Search, 
-  MapPin, 
-  User, 
-  TrendingUp, 
-  CheckCircle2, 
-  Clock, 
-  Layers, 
-  Users, 
-  FileSpreadsheet, 
-  ArrowRight, 
-  Edit3, 
-  Trash2, 
-  Copy, 
+import {
+  Building2,
+  Plus,
+  Search,
+  MapPin,
+  User,
+  TrendingUp,
+  CheckCircle2,
+  Clock,
+  Layers,
+  Users,
+  FileSpreadsheet,
+  ArrowRight,
+  Edit3,
+  Trash2,
+  Copy,
   DollarSign,
   AlertCircle,
   BarChart3,
@@ -52,6 +52,8 @@ interface ProjectDashboardProps {
   onLiveSheetsResync?: () => void;
   onExportProjectTemplate?: () => void;
   onImportProjectsCsv?: (file: File) => void;
+  onExportSubmissionsTemplate?: () => void;
+  onImportSubmissionsCsv?: (file: File) => void
   onExportApprovedPoPdf?: (project: Project) => void;
   onDeleteDemoProjects?: () => void;
 }
@@ -75,6 +77,8 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   onLiveSheetsResync,
   onExportProjectTemplate,
   onImportProjectsCsv,
+  onExportSubmissionsTemplate,
+  onImportSubmissionsCsv,
   onExportApprovedPoPdf,
   onDeleteDemoProjects,
 }) => {
@@ -85,6 +89,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => googleAuthService.isLoggedIn());
   const actionsMenuRef = useRef<HTMLDivElement>(null);
   const projectFileInputRef = useRef<HTMLInputElement>(null);
+  const submissionsFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handleAuthSync = () => {
@@ -158,8 +163,8 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
 
     const avgProgress = projects.length > 0
       ? Math.round(
-          projects.reduce((acc, p) => acc + calculateMasterProgress(p.scopes), 0) / projects.length
-        )
+        projects.reduce((acc, p) => acc + calculateMasterProgress(p.scopes), 0) / projects.length
+      )
       : 0;
 
     return {
@@ -196,7 +201,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
       {/* Executive Portfolio Header */}
       <header className="w-full max-w-full bg-slate-900 text-white border-b border-slate-800 shadow-md relative z-50 overflow-visible">
         {/* Main Top Navigation Container */}
-        <div 
+        <div
           className="w-full max-w-[100vw] box-border flex items-center justify-between overflow-visible px-4 py-2 relative z-50"
           style={{
             width: '100%',
@@ -238,7 +243,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
           </button>
 
           {/* Middle Section: Action Controls */}
-          <div 
+          <div
             className="flex items-center gap-2 shrink-0"
             style={{
               display: 'flex',
@@ -278,7 +283,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
           </div>
 
           {/* Right Section: User Profile & Sign Out anchored to right margin + Overflow Menu */}
-          <div 
+          <div
             className="flex items-center gap-2 shrink-0 ml-auto"
             style={{
               flexShrink: 0,
@@ -342,225 +347,271 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                 <MoreVertical className="w-4 h-4" />
               </button>
 
-                {isActionsMenuOpen && (
-                  <div 
-                    className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-[9999] animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-800"
-                    style={{ position: 'absolute', zIndex: 9999 }}
-                  >
-                    {/* Admin & Sync Utilities */}
-                    <div className="py-1">
-                      <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
-                        Admin & Sync Utilities
-                      </div>
+              {isActionsMenuOpen && (
+                <div
+                  className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 z-[9999] animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-800"
+                  style={{ position: 'absolute', zIndex: 9999 }}
+                >
+                  {/* Admin & Sync Utilities */}
+                  <div className="py-1">
+                    <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+                      Admin & Sync Utilities
+                    </div>
 
-                      {/* ⚡ Live Webhook Sync Status */}
-                      <HeaderSyncBadge
-                        masterSheetUrl={
-                          sheetsConfig?.sheetUrl
-                            ? sheetsConfig.sheetUrl.replace(/\/export.*$/, '/edit')
-                            : 'https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit'
-                        }
-                        totalProjectsCount={projects.length || 10}
-                        totalFormsCount={44}
-                        trigger={(openDiagnostics) => (
-                          <button
-                            type="button"
-                            id="home-menu-webhook-sync-status-btn"
-                            onClick={() => {
-                              setIsActionsMenuOpen(false);
-                              openDiagnostics();
-                            }}
-                            className="w-full text-left flex items-center justify-between px-3.5 py-2 text-xs font-semibold text-emerald-300 hover:text-emerald-200 hover:bg-slate-800 transition-colors cursor-pointer group"
-                            title="Open live webhook synchronization diagnostics & connection logs"
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <span className="relative flex h-2 w-2 shrink-0">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                              </span>
-                              <span>⚡ Live Webhook Sync Status</span>
-                            </div>
-                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                              44 Forms
+                    {/* ⚡ Live Webhook Sync Status */}
+                    <HeaderSyncBadge
+                      masterSheetUrl={
+                        sheetsConfig?.sheetUrl
+                          ? sheetsConfig.sheetUrl.replace(/\/export.*$/, '/edit')
+                          : 'https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit'
+                      }
+                      totalProjectsCount={projects.length || 10}
+                      totalFormsCount={44}
+                      trigger={(openDiagnostics) => (
+                        <button
+                          type="button"
+                          id="home-menu-webhook-sync-status-btn"
+                          onClick={() => {
+                            setIsActionsMenuOpen(false);
+                            openDiagnostics();
+                          }}
+                          className="w-full text-left flex items-center justify-between px-3.5 py-2 text-xs font-semibold text-emerald-300 hover:text-emerald-200 hover:bg-slate-800 transition-colors cursor-pointer group"
+                          title="Open live webhook synchronization diagnostics & connection logs"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="relative flex h-2 w-2 shrink-0">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                             </span>
-                          </button>
-                        )}
-                      />
+                            <span>⚡ Live Webhook Sync Status</span>
+                          </div>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            44 Forms
+                          </span>
+                        </button>
+                      )}
+                    />
 
-                      {/* 🔄 Sync Sheets Data */}
+                    {/* 🔄 Sync Sheets Data */}
+                    <button
+                      type="button"
+                      id="home-menu-sync-sheets-btn"
+                      onClick={() => {
+                        setIsActionsMenuOpen(false);
+                        if (onLiveSheetsResync) onLiveSheetsResync();
+                        else if (onTriggerInstantSync) onTriggerInstantSync();
+                      }}
+                      disabled={isSyncing}
+                      className="w-full text-left flex items-center justify-between px-3.5 py-2 text-xs font-semibold text-blue-300 hover:text-blue-200 hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
+                      title="Sync latest quotes and submissions from Google Sheets in real time"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <RefreshCw className={`w-4 h-4 text-blue-400 shrink-0 ${isSyncing ? 'animate-spin' : ''}`} />
+                        <span>🔄 Sync Sheets Data</span>
+                      </div>
+                      {isSyncing && (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">
+                          Syncing...
+                        </span>
+                      )}
+                    </button>
+
+                    {/* 📅 Scheduled Queue */}
+                    {onOpenScheduledQueue && (
                       <button
                         type="button"
-                        id="home-menu-sync-sheets-btn"
+                        id="home-menu-scheduled-queue-btn"
                         onClick={() => {
                           setIsActionsMenuOpen(false);
-                          if (onLiveSheetsResync) onLiveSheetsResync();
-                          else if (onTriggerInstantSync) onTriggerInstantSync();
+                          onOpenScheduledQueue();
                         }}
-                        disabled={isSyncing}
-                        className="w-full text-left flex items-center justify-between px-3.5 py-2 text-xs font-semibold text-blue-300 hover:text-blue-200 hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
-                        title="Sync latest quotes and submissions from Google Sheets in real time"
+                        className="w-full text-left flex items-center justify-between px-3.5 py-2 text-xs font-semibold text-amber-300 hover:text-amber-200 hover:bg-slate-800 transition-colors cursor-pointer group"
+                        title="View & manage scheduled email dispatches"
                       >
                         <div className="flex items-center gap-2.5">
-                          <RefreshCw className={`w-4 h-4 text-blue-400 shrink-0 ${isSyncing ? 'animate-spin' : ''}`} />
-                          <span>🔄 Sync Sheets Data</span>
+                          <CalendarClock className="w-4 h-4 text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
+                          <span>📅 Scheduled Queue</span>
                         </div>
-                        {isSyncing && (
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">
-                            Syncing...
+                        {pendingScheduledCount > 0 && (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            {pendingScheduledCount} Pending
                           </span>
                         )}
                       </button>
+                    )}
 
-                      {/* 📅 Scheduled Queue */}
-                      {onOpenScheduledQueue && (
+                    {/* 🧹 Delete Example/Demo Projects */}
+                    {onDeleteDemoProjects && (
+                      <button
+                        type="button"
+                        id="home-menu-delete-demo-projects-btn"
+                        onClick={() => {
+                          setIsActionsMenuOpen(false);
+                          onDeleteDemoProjects();
+                        }}
+                        className="w-full text-left flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-rose-300 hover:text-rose-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                        title="Remove all default seed/example project documents and their associated quotes from Firestore"
+                      >
+                        <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
+                        <span>🧹 Delete Example/Demo Projects</span>
+                      </button>
+                    )}
+                  </div>
+                  {/* CSV Template & Import Tools */}
+                  {(onExportProjectTemplate || onImportProjectsCsv || onExportSubmissionsTemplate || onImportSubmissionsCsv) && (
+                    <div className="py-1">
+                      <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+                        Templates & Import
+                      </div>
+                      {onExportProjectTemplate && (
                         <button
                           type="button"
-                          id="home-menu-scheduled-queue-btn"
+                          id="home-menu-export-project-template-btn"
                           onClick={() => {
                             setIsActionsMenuOpen(false);
-                            onOpenScheduledQueue();
+                            onExportProjectTemplate();
                           }}
-                          className="w-full text-left flex items-center justify-between px-3.5 py-2 text-xs font-semibold text-amber-300 hover:text-amber-200 hover:bg-slate-800 transition-colors cursor-pointer group"
-                          title="View & manage scheduled email dispatches"
+                          className="w-full text-left flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
                         >
-                          <div className="flex items-center gap-2.5">
-                            <CalendarClock className="w-4 h-4 text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
-                            <span>📅 Scheduled Queue</span>
-                          </div>
-                          {pendingScheduledCount > 0 && (
-                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                              {pendingScheduledCount} Pending
-                            </span>
-                          )}
+                          <Download className="w-4 h-4 text-blue-400 shrink-0" />
+                          <span>Export Project Template (.CSV)</span>
                         </button>
                       )}
 
-                      {/* 🧹 Delete Example/Demo Projects */}
-                      {onDeleteDemoProjects && (
+                      {onImportProjectsCsv && (
                         <button
                           type="button"
-                          id="home-menu-delete-demo-projects-btn"
+                          id="home-menu-import-projects-btn"
                           onClick={() => {
                             setIsActionsMenuOpen(false);
-                            onDeleteDemoProjects();
+                            projectFileInputRef.current?.click();
                           }}
-                          className="w-full text-left flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-rose-300 hover:text-rose-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                          title="Remove all default seed/example project documents and their associated quotes from Firestore"
+                          className="w-full text-left flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-emerald-300 hover:text-emerald-200 hover:bg-slate-800 transition-colors cursor-pointer"
                         >
-                          <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
-                          <span>🧹 Delete Example/Demo Projects</span>
+                          <Upload className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span>Import Projects (.CSV)</span>
+                        </button>
+                      )}
+
+                      {onExportSubmissionsTemplate && (
+                        <button
+                          type="button"
+                          id="home-menu-export-submissions-template-btn"
+                          onClick={() => {
+                            setIsActionsMenuOpen(false);
+                            onExportSubmissionsTemplate();
+                          }}
+                          className="w-full text-left flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                        >
+                          <Download className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>Export Submissions Template (.CSV)</span>
+                        </button>
+                      )}
+
+                      {onImportSubmissionsCsv && (
+                        <button
+                          type="button"
+                          id="home-menu-import-submissions-btn"
+                          onClick={() => {
+                            setIsActionsMenuOpen(false);
+                            submissionsFileInputRef.current?.click();
+                          }}
+                          className="w-full text-left flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-emerald-300 hover:text-emerald-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                        >
+                          <Upload className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span>Import Submissions (.CSV)</span>
                         </button>
                       )}
                     </div>
-
-                    {/* CSV Template & Import Tools */}
-                    {(onExportProjectTemplate || onImportProjectsCsv) && (
-                      <div className="py-1">
-                        <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
-                          Templates & Import
-                        </div>
-                        {onExportProjectTemplate && (
-                          <button
-                            type="button"
-                            id="home-menu-export-project-template-btn"
-                            onClick={() => {
-                              setIsActionsMenuOpen(false);
-                              onExportProjectTemplate();
-                            }}
-                            className="w-full text-left flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                          >
-                            <Download className="w-4 h-4 text-blue-400 shrink-0" />
-                            <span>Export Project Template (.CSV)</span>
-                          </button>
-                        )}
-
-                        {onImportProjectsCsv && (
-                          <button
-                            type="button"
-                            id="home-menu-import-projects-btn"
-                            onClick={() => {
-                              setIsActionsMenuOpen(false);
-                              projectFileInputRef.current?.click();
-                            }}
-                            className="w-full text-left flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-emerald-300 hover:text-emerald-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                          >
-                            <Upload className="w-4 h-4 text-emerald-400 shrink-0" />
-                            <span>Import Projects (.CSV)</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                  {onImportProjectsCsv && (
-                    <input
-                      ref={projectFileInputRef}
-                      id="home-import-projects-input"
-                      type="file"
-                      accept=".csv,text/csv,text/plain"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          onImportProjectsCsv(file);
-                          e.target.value = '';
-                        }
-                      }}
-                    />
                   )}
                 </div>
-              </div>
-            </div>
+              )}
 
-          {/* Portfolio Metric Overview Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-800 px-4 sm:px-6 lg:px-8 pb-3">
-            <div className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-xl">
-              <span className="block text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                Active Projects
-              </span>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-xl font-extrabold text-white">{portfolioStats.totalProjects}</span>
-                <span className="text-[11px] text-slate-400 font-medium">Workspaces</span>
-              </div>
-            </div>
+              {onImportProjectsCsv && (
+                <input
+                  ref={projectFileInputRef}
+                  id="home-import-projects-input"
+                  type="file"
+                  accept=".csv,text/csv,text/plain"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      onImportProjectsCsv(file);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              )}
 
-            <div className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-xl">
-              <span className="block text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                Total Allocated Budget
-              </span>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-xl font-extrabold text-white">
-                  {formatCurrency(portfolioStats.totalTargetBudget)}
-                </span>
-              </div>
-            </div>
-
-            <div className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-xl">
-              <span className="block text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                Committed / Best Quotes
-              </span>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-xl font-extrabold text-emerald-400">
-                  {formatCurrency(portfolioStats.totalCommitted)}
-                </span>
-                <span className="text-[10px] font-bold text-slate-400">
-                  ({portfolioStats.totalPOsSent} POs)
-                </span>
-              </div>
-            </div>
-
-            <div className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-xl">
-              <span className="block text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                Avg Procurement Progress
-              </span>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-xl font-extrabold text-blue-400">{portfolioStats.avgProgress}%</span>
-                <span className="text-[11px] text-slate-400 font-medium">Overall Complete</span>
-              </div>
+              {onImportSubmissionsCsv && (
+                <input
+                  ref={submissionsFileInputRef}
+                  id="home-import-submissions-input"
+                  type="file"
+                  accept=".csv,text/csv,text/plain"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      onImportSubmissionsCsv(file);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              )}
             </div>
           </div>
-        </header>
+        </div>
+
+        {/* Portfolio Metric Overview Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-800 px-4 sm:px-6 lg:px-8 pb-3">
+          <div className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-xl">
+            <span className="block text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+              Active Projects
+            </span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="text-xl font-extrabold text-white">{portfolioStats.totalProjects}</span>
+              <span className="text-[11px] text-slate-400 font-medium">Workspaces</span>
+            </div>
+          </div>
+
+          <div className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-xl">
+            <span className="block text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+              Total Allocated Budget
+            </span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="text-xl font-extrabold text-white">
+                {formatCurrency(portfolioStats.totalTargetBudget)}
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-xl">
+            <span className="block text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+              Committed / Best Quotes
+            </span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="text-xl font-extrabold text-emerald-400">
+                {formatCurrency(portfolioStats.totalCommitted)}
+              </span>
+              <span className="text-[10px] font-bold text-slate-400">
+                ({portfolioStats.totalPOsSent} POs)
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-slate-800/80 border border-slate-700/80 p-3 rounded-xl">
+            <span className="block text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+              Avg Procurement Progress
+            </span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="text-xl font-extrabold text-blue-400">{portfolioStats.avgProgress}%</span>
+              <span className="text-[11px] text-slate-400 font-medium">Overall Complete</span>
+            </div>
+          </div>
+        </div>
+      </header>
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -587,11 +638,10 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                   key={st}
                   type="button"
                   onClick={() => setStatusFilter(st)}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-                    statusFilter === st
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${statusFilter === st
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
-                  }`}
+                    }`}
                 >
                   {st === 'ALL' ? 'All Projects' : st}
                 </button>
@@ -633,7 +683,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {filteredProjects.map((project) => {
               const masterProgress = calculateMasterProgress(project.scopes);
-              
+
               // Calculate Project Budget and Committed
               let projectBudget = 0;
               let projectCommitted = 0;
