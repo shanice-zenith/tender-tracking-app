@@ -561,8 +561,7 @@ export default function App() {
 
           if (!company || !rawProject) continue;
 
-          const matchedProjCandidate = matchProjectCandidate(rawProject);
-          cconst targetProjIndex = updatedProjectsList.findIndex((p) =>
+          const targetProjIndex = updatedProjectsList.findIndex((p) =>
             isProjectMatch(rawProject, p)
           );
 
@@ -1093,9 +1092,15 @@ export default function App() {
 
         const targetScope = updatedScopes[scopeIdx];
         const currentTrades = [...(targetScope.trades || [])];
-        const tradeIdx = currentTrades.findIndex(
-          (t) => (t.companyName || '').trim().toLowerCase() === compLower
-        );
+        // Helper to normalize contractor names
+        const cleanComp = (val: string) => (val || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const targetComp = cleanComp(companyName);
+
+        // 1. Locate trade row by matching either t.companyName or t.name
+        const tradeIdx = currentTrades.findIndex((t: any) => {
+          const tName = cleanComp(t.companyName || t.name || t.contractorName || '');
+          return tName === targetComp || tName.includes(targetComp) || targetComp.includes(tName);
+        });
 
         const newBreakdownItem: QuoteBreakdownItem = {
           id: `brk-${quote.id || Date.now()}`,
@@ -1110,51 +1115,55 @@ export default function App() {
         if (tradeIdx >= 0) {
           const curTrade = currentTrades[tradeIdx];
           const existingBreakdowns = curTrade.quoteBreakdown || [];
-          const quoteStatus = (quote.actionItemStatus || quote.actionStatus || curTrade.actionStatus || 'Estimate Submitted') as ActionItemStatus;
+          const quoteStatus = (quote.actionItemStatus || quote.actionStatus || curTrade.actionStatus || 'Estimate Submitted') as any;
           const isDifferent =
             curTrade.quotedFigure !== enteredAmount ||
             curTrade.actionStatus !== quoteStatus ||
-            !existingBreakdowns.some((b) => b.costCode === costCode);
+            !existingBreakdowns.some((b: any) => b.costCode === costCode);
 
           if (isDifferent) {
             projectScopesChanged = true;
             hasOverallChanges = true;
-            lastIngestedQuote = quote;
+            (lastIngestedQuote as any) = quote;
 
             const filteredBreakdowns = existingBreakdowns.filter(
-              (b) => b.costCode !== costCode && b.itemDescription.toLowerCase() !== (tenderItemClean || expectedScopeName).toLowerCase()
+              (b: any) => b.costCode !== costCode && b.itemDescription.toLowerCase() !== (tenderItemClean || expectedScopeName).toLowerCase()
             );
             filteredBreakdowns.push(newBreakdownItem);
 
-            const docs = [...(curTrade.attachedDocs || [])];
+            const docs: any[] = [...(curTrade.attachedDocs || [])];
+
+            // 1. Handle attachedDocs array if present
             if (Array.isArray(quote.attachedDocs) && quote.attachedDocs.length > 0) {
-              quote.attachedDocs.forEach((qd) => {
-                if (qd && qd.url && !docs.some((d) => d.url === qd.url)) {
+              quote.attachedDocs.forEach((qd: any) => {
+                if (qd && qd.url && !docs.some((d: any) => d.url === qd.url)) {
                   docs.push({
                     id: qd.id || `doc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-                    name: qd.name || `${companyName} Quote Document`,
+                    name: qd.name || `${companyName} Quote`,
                     url: qd.url,
                     type: qd.type || 'quote',
-                    addedAt: qd.addedAt || (quote.submittedAt || new Date().toISOString()).split('T')[0],
-                    uploadedAt: qd.uploadedAt || quote.submittedAt || new Date().toISOString()
-                  });
+                    uploadedAt: qd.uploadedAt || new Date().toISOString()
+                  } as any);
                 }
               });
             }
 
-            if (quote.docUrl && !docs.some((d) => d.url === quote.docUrl)) {
+            // 2. Handle direct string URLs from Firestore (docUrl or attachmentUrl)
+            const singleDocUrl = quote.docUrl || quote.attachmentUrl;
+            if (singleDocUrl && !docs.some((d: any) => d.url === singleDocUrl)) {
               docs.push({
-                id: `doc-${Date.now()}`,
-                name: `${companyName} Quote Form Submission`,
-                url: quote.docUrl,
+                id: `doc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                name: `${companyName} Quote`,
+                url: singleDocUrl,
                 type: 'quote',
                 addedAt: (quote.submittedAt || new Date().toISOString()).split('T')[0],
                 uploadedAt: quote.submittedAt || new Date().toISOString()
-              });
+              } as any);
             }
 
-            const tradeNotes = [...(curTrade.notes || [])];
-            if (quote.notes && !tradeNotes.some((n) => n.text === quote.notes)) {
+            // 3. Process notes array
+            const tradeNotes: any[] = Array.isArray(curTrade.notes) ? [...curTrade.notes] : [];
+            if (quote.notes && typeof quote.notes === 'string' && !tradeNotes.some((n: any) => n.text === quote.notes)) {
               tradeNotes.push({
                 id: `note-${Date.now()}`,
                 author: companyName,
@@ -1163,17 +1172,25 @@ export default function App() {
               });
             }
 
+            // 4. Update the existing trade row
             currentTrades[tradeIdx] = {
               ...curTrade,
-              actionStatus: quoteStatus,
-              quoteDocId: quote.id || curTrade.quoteDocId,
+              companyName: companyName,
+              name: curTrade.name || companyName,
+              contractorName: curTrade.contractorName || companyName,
               quotedFigure: enteredAmount,
+              enteredAmount: enteredAmount,
+              amount: enteredAmount,
+              actionItemStatus: quoteStatus,
+              actionStatus: quoteStatus,
+              status: quoteStatus,
+              quoteDocId: quote.id || curTrade.quoteDocId,
               contactEmail: quote.emailAddress || quote.email || curTrade.contactEmail,
-              quoteBreakdown: (Array.isArray(quote.quoteBreakdown) && quote.quoteBreakdown.length > 0)
-                ? quote.quoteBreakdown
-                : filteredBreakdowns,
               attachedDocs: docs,
-              notes: tradeNotes,
+              docUrl: singleDocUrl || curTrade.docUrl,
+              attachmentUrl: singleDocUrl || curTrade.attachmentUrl,
+              notes: tradeNotes.length > 0 ? tradeNotes : (quote.notes || curTrade.notes),
+              quoteBreakdown: filteredBreakdowns,
               lastModifiedBy: quote.lastModifiedBy || quote.emailAddress || quote.email || companyName,
               updatedAt: quote.updatedAt || quote.submittedAt || new Date().toISOString()
             };
@@ -1186,37 +1203,57 @@ export default function App() {
         } else {
           projectScopesChanged = true;
           hasOverallChanges = true;
-          lastIngestedQuote = quote;
+          (lastIngestedQuote as any) = quote;
 
-          const newTrade: TradeEntry = {
+          const singleDocUrl = quote.docUrl || quote.attachmentUrl;
+          const initialDocs: any[] = [];
+          if (Array.isArray(quote.attachedDocs) && quote.attachedDocs.length > 0) {
+            quote.attachedDocs.forEach((qd: any) => {
+              if (qd && qd.url) initialDocs.push(qd);
+            });
+          }
+          if (singleDocUrl && !initialDocs.some((d: any) => d.url === singleDocUrl)) {
+            initialDocs.push({
+              id: `doc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+              name: `${companyName} Quote Form Submission`,
+              url: singleDocUrl,
+              type: 'quote',
+              addedAt: (quote.submittedAt || new Date().toISOString()).split('T')[0],
+              uploadedAt: quote.submittedAt || new Date().toISOString()
+            } as any);
+          }
+
+          const initialNotes: any[] = quote.notes ? [{
+            id: `note-${Date.now()}`,
+            author: companyName,
+            timestamp: quote.submittedAt || new Date().toISOString(),
+            text: quote.notes
+          }] : [];
+
+          const quoteStatus = (quote.actionItemStatus || quote.actionStatus || 'Estimate Submitted') as any;
+
+          const newTrade: any = {
             id: quote.id || `tr-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
             quoteDocId: quote.id,
             scopeId: targetScope.id,
+            name: companyName,
             companyName,
             contractorName: quote.contractorName || companyName,
             contactEmail: quote.emailAddress || quote.email || '',
             category: targetScope.name,
             currency: 'CAD',
             quotedFigure: enteredAmount,
-            actionStatus: (quote.actionItemStatus || quote.actionStatus || 'Estimate Submitted') as ActionItemStatus,
+            enteredAmount: enteredAmount,
+            amount: enteredAmount,
+            actionStatus: quoteStatus,
+            actionItemStatus: quoteStatus,
+            status: quoteStatus,
             poSent: false,
             isAwarded: false,
-            notes: quote.notes ? [{
-              id: `note-${Date.now()}`,
-              author: companyName,
-              timestamp: quote.submittedAt || new Date().toISOString(),
-              text: quote.notes
-            }] : [],
-            attachedDocs: (Array.isArray(quote.attachedDocs) && quote.attachedDocs.length > 0)
-              ? quote.attachedDocs
-              : (quote.docUrl ? [{
-                id: `doc-${Date.now()}`,
-                name: `${companyName} Quote Form Submission`,
-                url: quote.docUrl,
-                type: 'quote',
-                addedAt: (quote.submittedAt || new Date().toISOString()).split('T')[0],
-                uploadedAt: quote.submittedAt || new Date().toISOString()
-              }] : []),
+            notes: initialNotes,
+            attachedDocs: initialDocs,
+            docUrl: singleDocUrl || '',
+            attachmentUrl: singleDocUrl || '',
             quoteBreakdown: (Array.isArray(quote.quoteBreakdown) && quote.quoteBreakdown.length > 0)
               ? quote.quoteBreakdown
               : [newBreakdownItem],
