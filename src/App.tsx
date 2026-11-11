@@ -64,7 +64,7 @@ import {
   PhaseQuoteImportRow
 } from './services/bulkImportExportService';
 import { generateScopesFromTemplate } from './data/projectTemplates';
-import { matchProjectCandidate } from './data/projectMatcher';
+import { matchProjectCandidate, isProjectMatch } from './data/projectMatcher';
 import { CANONICAL_ZENITH_PROJECT_IDS } from './data/realZenithProjects';
 import { isExampleOrMockTerm } from './utils/projectValidation';
 import { Header } from './components/Header';
@@ -562,10 +562,8 @@ export default function App() {
           if (!company || !rawProject) continue;
 
           const matchedProjCandidate = matchProjectCandidate(rawProject);
-          const targetProjIndex = updatedProjectsList.findIndex((p) =>
-            p.id === matchedProjCandidate.projectId ||
-            p.name.toLowerCase().trim() === rawProject.toLowerCase().trim() ||
-            p.name.toLowerCase().includes(rawProject.toLowerCase().trim())
+          cconst targetProjIndex = updatedProjectsList.findIndex((p) =>
+            isProjectMatch(rawProject, p)
           );
 
           if (targetProjIndex === -1) continue;
@@ -1032,14 +1030,15 @@ export default function App() {
 
     const updatedProjects = currentProjects.map((project) => {
       const matchingQuotes = incomingQuotes.filter((q) => {
-        if (q.projectId && q.projectId === project.id) return true;
-        if (q.projectName && project.name) {
-          const matched = matchProjectCandidate(q.projectName);
-          return (
-            matched.projectId === project.id ||
-            matched.projectName.toLowerCase().trim() === project.name.toLowerCase().trim()
-          );
+        // Direct ID match
+        if (q.projectId && (q.projectId === project.id || q.projectId === project.name)) return true;
+
+        // Dynamic project match against the active project
+        const rawToCheck = q.projectName || q.projectId || '';
+        if (rawToCheck && isProjectMatch(rawToCheck, project)) {
+          return true;
         }
+
         return false;
       });
 

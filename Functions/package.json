@@ -1,0 +1,13 @@
+{
+    "name": "functions",
+    "description": "Zenith Tender Tracker Firestore Notification Functions",
+    "version": "1.0.0",
+    "main": "index.js",
+    "engines": {
+        "node": "22"
+    },
+    "dependencies": {
+        "firebase-admin": "^14.5.0",
+        "firebase-functions": "^7.4.0"
+    }
+}
