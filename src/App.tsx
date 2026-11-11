@@ -250,14 +250,50 @@ export default function App() {
             if (proj.id !== activeProjectId) return proj;
 
             const updatedScopes = proj.scopes?.map((scope) => {
-              // Match quotes strictly by immutable scopeId
               const matchedQuotes = projectQuotes.filter(
                 (q) => q.scopeId === scope.id
               );
 
+              if (matchedQuotes.length === 0) return scope;
+
+              // Preserve all existing invited trades (e.g., Winter Electrical)
+              const existingTrades = [...(scope.trades || [])];
+
+              matchedQuotes.forEach((quote) => {
+                const quoteComp = (quote.companyName || quote.contractorName || '').trim().toLowerCase();
+                const cleanComp = (val: string) => (val || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+                const existingIdx = existingTrades.findIndex((t) => {
+                  const tComp = cleanComp(t.companyName || t.name || t.contractorName || '');
+                  return tComp === cleanComp(quoteComp) || tComp.includes(cleanComp(quoteComp)) || cleanComp(quoteComp).includes(tComp);
+                });
+
+                if (existingIdx >= 0) {
+                  // Update existing invited trade with quote amount & submitted status
+                  existingTrades[existingIdx] = {
+                    ...existingTrades[existingIdx],
+                    ...quote,
+                    id: existingTrades[existingIdx].id, // Preserve internal trade ID
+                    companyName: quote.companyName || existingTrades[existingIdx].companyName,
+                    quotedFigure: Number(quote.quotedFigure || quote.enteredAmount || quote.amount || 0),
+                    actionStatus: 'Estimate Submitted',
+                    actionItemStatus: 'Estimate Submitted'
+                  };
+                } else {
+                  // Add as a new trade entry if they were not pre-invited
+                  existingTrades.push({
+                    ...quote,
+                    id: quote.id || `tr-${Date.now()}`,
+                    quotedFigure: Number(quote.quotedFigure || quote.enteredAmount || quote.amount || 0),
+                    actionStatus: 'Estimate Submitted',
+                    actionItemStatus: 'Estimate Submitted'
+                  });
+                }
+              });
+
               return {
                 ...scope,
-                trades: matchedQuotes.length > 0 ? matchedQuotes : scope.trades
+                trades: existingTrades
               };
             });
 

@@ -8,7 +8,7 @@ const APPS_SCRIPT_DISPATCHER =
   "https://script.google.com/a/macros/thezenithgroup.ca/s/AKfycby8WGdj9nbiZ7gILzjXL6FjjJJMbcPMR4OHB9S4oNk42VRfQXSYEBhxpTZ1zp37vjjx/exec";
 
 // Recipients list
-const RECIPIENT_EMAILS = "info@thezenithgroup.ca";
+const RECIPIENT_EMAILS = "info@thezenithgroup.ca"                                                                                                                 ;
 
 exports.onQuoteSubmitted = onDocumentWritten(
   {
