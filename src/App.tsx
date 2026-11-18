@@ -251,42 +251,93 @@ export default function App() {
 
             const updatedScopes = proj.scopes?.map((scope) => {
               const matchedQuotes = projectQuotes.filter(
-                (q) => q.scopeId === scope.id
+                (q) =>
+                  (q.scopeId && q.scopeId === scope.id) ||
+                  (q.costCode && String(q.costCode).trim() === String(scope.costCode).trim()) ||
+                  (q.trade && q.trade.toLowerCase().trim() === scope.name.toLowerCase().trim())
               );
 
-              if (matchedQuotes.length === 0) return scope;
+              if (!matchedQuotes || matchedQuotes.length === 0) return scope;
 
-              // Preserve all existing invited trades (e.g., Winter Electrical)
+              // 1. Keep existing invited trades intact (e.g. Winter Electrical)
               const existingTrades = [...(scope.trades || [])];
 
               matchedQuotes.forEach((quote) => {
-                const quoteComp = (quote.companyName || quote.contractorName || '').trim().toLowerCase();
+                const quoteComp = (quote.companyName || quote.contractorName || '').trim();
                 const cleanComp = (val: string) => (val || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                const targetComp = cleanComp(quoteComp);
 
+                // Match with contact directory to guarantee exact casing match for the dropdown
+                const matchedContact = contacts?.find(
+                  (c) => cleanComp(c.company) === targetComp || cleanComp(c.name) === targetComp
+                );
+                const properCompanyName = matchedContact ? matchedContact.company : quoteComp;
+
+                // Find if trade already exists in scope
                 const existingIdx = existingTrades.findIndex((t) => {
                   const tComp = cleanComp(t.companyName || t.name || t.contractorName || '');
-                  return tComp === cleanComp(quoteComp) || tComp.includes(cleanComp(quoteComp)) || cleanComp(quoteComp).includes(tComp);
+                  return tComp === targetComp || tComp.includes(targetComp) || targetComp.includes(tComp);
                 });
 
+                const amount = Number(quote.quotedFigure || quote.enteredAmount || quote.amount || 0);
+                const status = amount > 0 ? 'Estimate Submitted' : 'Estimate Requested';
+
+                const docUrl = quote.docUrl || quote.attachmentUrl;
+                const docs = docUrl ? [{
+                  id: `doc-${Date.now()}`,
+                  name: `${properCompanyName} Quote Document`,
+                  url: docUrl,
+                  type: 'quote' as const,
+                  uploadedAt: quote.submittedAt || new Date().toISOString()
+                }] : [];
+
                 if (existingIdx >= 0) {
-                  // Update existing invited trade with quote amount & submitted status
+                  // Merge into existing invited trade row
                   existingTrades[existingIdx] = {
                     ...existingTrades[existingIdx],
-                    ...quote,
-                    id: existingTrades[existingIdx].id, // Preserve internal trade ID
-                    companyName: quote.companyName || existingTrades[existingIdx].companyName,
-                    quotedFigure: Number(quote.quotedFigure || quote.enteredAmount || quote.amount || 0),
-                    actionStatus: 'Estimate Submitted',
-                    actionItemStatus: 'Estimate Submitted'
+                    companyName: properCompanyName,
+                    name: properCompanyName,
+                    contractorName: properCompanyName,
+                    quotedFigure: amount,
+                    enteredAmount: amount,
+                    amount: amount,
+                    actionStatus: status as any,
+                    actionItemStatus: status as any,
+                    status: status as any,
+                    attachedDocs: docs.length > 0 ? docs : existingTrades[existingIdx].attachedDocs,
+                    updatedAt: quote.updatedAt || quote.submittedAt || new Date().toISOString()
                   };
                 } else {
                   // Add as a new trade entry if they were not pre-invited
                   existingTrades.push({
-                    ...quote,
-                    id: quote.id || `tr-${Date.now()}`,
-                    quotedFigure: Number(quote.quotedFigure || quote.enteredAmount || quote.amount || 0),
-                    actionStatus: 'Estimate Submitted',
-                    actionItemStatus: 'Estimate Submitted'
+                    id: quote.id || `tr-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                    quoteDocId: quote.id,
+                    scopeId: scope.id,
+                    name: properCompanyName,
+                    companyName: properCompanyName,
+                    contractorName: properCompanyName,
+                    category: scope.name,
+                    currency: 'CAD',
+                    quotedFigure: amount,
+                    enteredAmount: amount,
+                    amount: amount,
+                    actionStatus: status as any,
+                    actionItemStatus: status as any,
+                    status: status as any,
+                    poSent: false,
+                    isAwarded: false,
+                    notes: Array.isArray(quote.notes)
+                      ? quote.notes
+                      : quote.notes
+                        ? [{
+                          id: `note-${Date.now()}`,
+                          author: properCompanyName,
+                          timestamp: quote.submittedAt || new Date().toISOString(),
+                          text: String(quote.notes)
+                        }]
+                        : [],
+                    attachedDocs: docs,
+                    updatedAt: quote.updatedAt || quote.submittedAt || new Date().toISOString()
                   });
                 }
               });
@@ -311,7 +362,7 @@ export default function App() {
 
     // Clean up listener when switching projects or unmounting
     return () => unsubscribe();
-  }, [activeProjectId]);
+  }, [activeProjectId, contacts]);
   const handleSignOut = useCallback(async () => {
     await googleAuthService.signOut();
     setCurrentUser(null);
@@ -562,10 +613,10 @@ export default function App() {
 
         const delimiter = lines[0].includes('\t') ? '\t' : ',';
         const headers = sheetsSyncService.parseCsvLine(lines[0], delimiter).map((h) =>
-          h.toLowerCase().replace(/['"]/g, '').trim()
+          String(h ?? '').toLowerCase().replace(/['"]/g, '').trim()
         );
 
-        // Detect column positions matching your Master Tender Sync file
+        // Detect column positions matching Master Tender Sync template
         const compIdx = headers.findIndex((h) => h.includes('company') || h.includes('contractor') || h.includes('vendor'));
         const prjIdx = headers.findIndex((h) => h.includes('project'));
         const itemIdx = headers.findIndex((h) => h.includes('item') || h.includes('scope') || h.includes('trade'));
@@ -574,7 +625,12 @@ export default function App() {
         const notesIdx = headers.findIndex((h) => h.includes('note') || h.includes('exclusion'));
         const linkIdx = headers.findIndex((h) => h.includes('link') || h.includes('doc') || h.includes('quote'));
         const statusIdx = headers.findIndex((h) => h.includes('status'));
-        const poIdx = headers.findIndex((h) => h.includes('po'));
+        const poIdx = headers.findIndex((h) => h === 'po sent' || h === 'po' || h.includes('po '));
+
+        const readCell = (cols: string[], idx: number, fallbackIdx: number): string => {
+          const val = idx >= 0 ? cols[idx] : cols[fallbackIdx];
+          return String(val ?? '').trim();
+        };
 
         let updatedProjectsList = [...projects];
         let newContactsList = [...contacts];
@@ -582,18 +638,18 @@ export default function App() {
 
         for (let i = 1; i < lines.length; i++) {
           const cols = sheetsSyncService.parseCsvLine(lines[i], delimiter);
-          if (cols.length === 0 || cols.every((c) => !c)) continue;
+          if (!cols || cols.length === 0 || cols.every((c) => !String(c ?? '').trim())) continue;
 
-          const company = (compIdx >= 0 ? cols[compIdx] : cols[0] || '').replace(/['"]/g, '').trim();
-          const rawProject = (prjIdx >= 0 ? cols[prjIdx] : cols[1] || '').replace(/['"]/g, '').trim();
-          const tenderItem = (itemIdx >= 0 ? cols[itemIdx] : cols[2] || '').replace(/['"]/g, '').trim();
-          const costCode = (codeIdx >= 0 ? cols[codeIdx] : cols[3] || '').replace(/['"]/g, '').trim();
-          const rawAmt = (amtIdx >= 0 ? cols[amtIdx] : cols[4] || '0').replace(/['"$,]/g, '').trim();
+          const company = readCell(cols, compIdx, 0).replace(/^["']|["']$/g, '').trim();
+          const rawProject = readCell(cols, prjIdx, 1).replace(/^["']|["']$/g, '').trim();
+          const tenderItem = readCell(cols, itemIdx, 2).replace(/^["']|["']$/g, '').trim();
+          const costCode = readCell(cols, codeIdx, 3).replace(/[^0-9]/g, '').trim();
+          const rawAmt = readCell(cols, amtIdx, 4).replace(/['"$,\s]/g, '').trim();
           const amount = parseFloat(rawAmt) || 0;
-          const notesText = (notesIdx >= 0 ? cols[notesIdx] : cols[5] || '').replace(/['"]/g, '').trim();
-          const docUrl = (linkIdx >= 0 ? cols[linkIdx] : cols[6] || '').replace(/['"]/g, '').trim();
-          const rawStatus = (statusIdx >= 0 ? cols[statusIdx] : '').replace(/['"]/g, '').trim();
-          const rawPo = (poIdx >= 0 ? cols[poIdx] : '').replace(/['"]/g, '').trim().toLowerCase();
+          const notesText = readCell(cols, notesIdx, 5).replace(/^["']|["']$/g, '').trim();
+          const docUrl = readCell(cols, linkIdx, 6).replace(/^["']|["']$/g, '').trim();
+          const rawStatus = readCell(cols, statusIdx, 7).replace(/^["']|["']$/g, '').trim();
+          const rawPo = readCell(cols, poIdx, 8).replace(/^["']|["']$/g, '').trim().toLowerCase();
 
           if (!company || !rawProject) continue;
 
@@ -623,12 +679,21 @@ export default function App() {
             targetProject.scopes = [...targetProject.scopes, targetScope];
           }
 
-          const isPoSent = rawPo === 'yes' || rawPo === 'true' || rawPo === '1' || rawStatus.toLowerCase().includes('po approved') || rawStatus.toLowerCase().includes('po sent');
-          const finalStatus: ActionItemStatus = isPoSent ? 'PO Approved' : (rawStatus as ActionItemStatus) || 'Estimate Submitted';
+          const isPoSent =
+            rawPo === 'yes' ||
+            rawPo === 'true' ||
+            rawPo === '1' ||
+            rawStatus.toLowerCase().includes('po approved') ||
+            rawStatus.toLowerCase().includes('po sent');
 
-          const tradeIndex = targetScope.trades.findIndex((t) =>
-            t.companyName.trim().toLowerCase() === company.toLowerCase() ||
-            t.contractorName.trim().toLowerCase() === company.toLowerCase()
+          const finalStatus: ActionItemStatus = isPoSent
+            ? 'PO Approved'
+            : (rawStatus as ActionItemStatus) || 'Estimate Submitted';
+
+          const tradeIndex = targetScope.trades.findIndex(
+            (t) =>
+              t.companyName.trim().toLowerCase() === company.toLowerCase() ||
+              t.contractorName.trim().toLowerCase() === company.toLowerCase()
           );
 
           const breakdownItem: QuoteBreakdownItem = {
@@ -640,32 +705,58 @@ export default function App() {
             notes: notesText
           };
 
-          const docsList: AttachedDoc[] = docUrl ? [{
-            id: `doc-${Date.now()}-${i}`,
-            name: `${company} Quote Document.pdf`,
-            url: docUrl,
-            type: 'quote',
-            addedAt: new Date().toISOString().split('T')[0]
-          }] : [];
+          const docsList: AttachedDoc[] = docUrl
+            ? [{
+              id: `doc-${Date.now()}-${i}`,
+              name: `${company} Quote Document.pdf`,
+              url: docUrl,
+              type: 'quote',
+              addedAt: new Date().toISOString().split('T')[0]
+            }]
+            : [];
 
-          const tradeNotes: NoteItem[] = notesText ? [{
-            id: `note-${Date.now()}-${i}`,
-            text: notesText,
-            author: 'CSV Import',
-            timestamp: new Date().toISOString()
-          }] : [];
+          const tradeNotes: NoteItem[] = notesText
+            ? [{
+              id: `note-${Date.now()}-${i}`,
+              text: notesText,
+              author: 'CSV Import',
+              timestamp: new Date().toISOString()
+            }]
+            : [];
 
           if (tradeIndex >= 0) {
             const existingTrade = targetScope.trades[tradeIndex];
+            const existingBreakdown = Array.isArray(existingTrade.quoteBreakdown)
+              ? [...existingTrade.quoteBreakdown]
+              : [];
+
+            const existingItemIdx = existingBreakdown.findIndex(
+              (b) => b.itemDescription.toLowerCase().trim() === breakdownItem.itemDescription.toLowerCase().trim()
+            );
+
+            if (existingItemIdx >= 0) {
+              existingBreakdown[existingItemIdx] = breakdownItem;
+            } else {
+              existingBreakdown.push(breakdownItem);
+            }
+
+            const summedFigure = existingBreakdown
+              .filter((b) => b.inclusionStatus !== 'excluded')
+              .reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+
             targetScope.trades[tradeIndex] = {
               ...existingTrade,
-              quotedFigure: amount > 0 ? amount : existingTrade.quotedFigure,
+              quotedFigure: summedFigure > 0 ? summedFigure : amount > 0 ? amount : existingTrade.quotedFigure,
               actionStatus: finalStatus,
               poSent: isPoSent ? true : existingTrade.poSent,
               isAwarded: isPoSent ? true : existingTrade.isAwarded,
-              notes: notesText ? [...existingTrade.notes, ...tradeNotes] : existingTrade.notes,
-              attachedDocs: docUrl ? [...existingTrade.attachedDocs, ...docsList] : existingTrade.attachedDocs,
-              quoteBreakdown: [breakdownItem]
+              notes: notesText && !existingTrade.notes.some((n) => n.text === notesText)
+                ? [...existingTrade.notes, ...tradeNotes]
+                : existingTrade.notes,
+              attachedDocs: docUrl && !existingTrade.attachedDocs.some((d) => d.url === docUrl)
+                ? [...existingTrade.attachedDocs, ...docsList]
+                : existingTrade.attachedDocs,
+              quoteBreakdown: existingBreakdown
             };
           } else {
             const newTrade: TradeEntry = {
@@ -687,7 +778,6 @@ export default function App() {
             targetScope.trades = [...targetScope.trades, newTrade];
           }
 
-          // Automatically record contact in Directory
           if (!newContactsList.some((c) => c.company.toLowerCase() === company.toLowerCase())) {
             newContactsList.push({
               id: `cnt-${Date.now()}-${i}`,
@@ -702,7 +792,7 @@ export default function App() {
             });
           }
 
-          targetProject.scopes = targetProject.scopes.map((s) => s.id === targetScope!.id ? targetScope! : s);
+          targetProject.scopes = targetProject.scopes.map((s) => (s.id === targetScope!.id ? targetScope! : s));
           updatedProjectsList[targetProjIndex] = targetProject;
           importedCount++;
         }
@@ -716,7 +806,8 @@ export default function App() {
           `Successfully imported ${importedCount} submission(s) and Purchase Order(s).`
         );
       } catch (err: any) {
-        showToast(`Import error: ${err.message || 'Failed to parse CSV file.'}`);
+        console.error('[CSV Import Error]', err);
+        showToast(`Import error: ${err?.message || 'Failed to parse CSV file.'}`);
       } finally {
         setIsSyncing(false);
       }
@@ -1100,10 +1191,17 @@ export default function App() {
 
         let scopeIdx = updatedScopes.findIndex((s) => {
           const sCode = String(s.costCode || getAccurateScopeCostCode(s.name) || '').trim();
+          const sNameClean = (s.name || '').toLowerCase().trim();
+          const expNameClean = (expectedScopeName || '').toLowerCase().trim();
+
+          // Match by name first so sub-items (like Garage Slab 21850) merge into the parent scope
+          if (expNameClean && (sNameClean === expNameClean || expNameClean.includes(sNameClean) || sNameClean.includes(expNameClean))) {
+            return true;
+          }
           if (costCode && costCode !== '20000' && costCode !== 'unassigned') {
             return sCode === costCode;
           }
-          return s.name.toLowerCase().trim() === expectedScopeName.toLowerCase().trim();
+          return false;
         });
 
         if (scopeIdx === -1) {
@@ -1150,26 +1248,58 @@ export default function App() {
 
         if (tradeIdx >= 0) {
           const curTrade = currentTrades[tradeIdx];
-          const existingBreakdowns = curTrade.quoteBreakdown || [];
+          const existingBreakdowns = Array.isArray(curTrade.quoteBreakdown) ? [...curTrade.quoteBreakdown] : [];
+          const incomingBreakdowns = Array.isArray(quote.quoteBreakdown) && quote.quoteBreakdown.length > 0
+            ? quote.quoteBreakdown
+            : [];
+
+          // Keep multi-line breakdowns intact instead of collapsing to 1 item
+          let mergedBreakdowns: QuoteBreakdownItem[] = existingBreakdowns;
+          if (incomingBreakdowns.length > 1) {
+            mergedBreakdowns = incomingBreakdowns;
+          } else if (incomingBreakdowns.length === 1 && existingBreakdowns.length <= 1) {
+            mergedBreakdowns = incomingBreakdowns;
+          } else if (existingBreakdowns.length > 1) {
+            // Update only the matching sub-code row (e.g., 20510, 20520, or 21820) without deleting the other rows
+            const subIdx = existingBreakdowns.findIndex(
+              (b: any) => String(b.costCode || '').trim() === String(costCode || '').trim()
+            );
+            if (subIdx >= 0 && enteredAmount > 0) {
+              mergedBreakdowns[subIdx] = {
+                ...existingBreakdowns[subIdx],
+                amount: enteredAmount,
+                notes: quote.notes || existingBreakdowns[subIdx].notes || ''
+              };
+            }
+          } else if (existingBreakdowns.length === 0) {
+            mergedBreakdowns = [newBreakdownItem];
+          }
+
+          const breakdownSum = mergedBreakdowns
+            .filter((b: any) => b.inclusionStatus !== 'excluded')
+            .reduce((sum: number, b: any) => sum + (Number(b.amount) || 0), 0);
+
+          // Never let a single sub-item ($7,338) overwrite a larger multi-item quote total ($25,976)
+          const resolvedFigure =
+            mergedBreakdowns.length > 1 && breakdownSum > 0
+              ? Math.max(breakdownSum, enteredAmount, Number(curTrade.quotedFigure) || 0)
+              : enteredAmount > 0
+                ? enteredAmount
+                : Number(curTrade.quotedFigure) || 0;
+
           const quoteStatus = (quote.actionItemStatus || quote.actionStatus || curTrade.actionStatus || 'Estimate Submitted') as any;
           const isDifferent =
-            curTrade.quotedFigure !== enteredAmount ||
+            curTrade.quotedFigure !== resolvedFigure ||
             curTrade.actionStatus !== quoteStatus ||
-            !existingBreakdowns.some((b: any) => b.costCode === costCode);
+            mergedBreakdowns.length !== existingBreakdowns.length;
 
           if (isDifferent) {
             projectScopesChanged = true;
             hasOverallChanges = true;
             (lastIngestedQuote as any) = quote;
 
-            const filteredBreakdowns = existingBreakdowns.filter(
-              (b: any) => b.costCode !== costCode && b.itemDescription.toLowerCase() !== (tenderItemClean || expectedScopeName).toLowerCase()
-            );
-            filteredBreakdowns.push(newBreakdownItem);
-
             const docs: any[] = [...(curTrade.attachedDocs || [])];
 
-            // 1. Handle attachedDocs array if present
             if (Array.isArray(quote.attachedDocs) && quote.attachedDocs.length > 0) {
               quote.attachedDocs.forEach((qd: any) => {
                 if (qd && qd.url && !docs.some((d: any) => d.url === qd.url)) {
@@ -1184,7 +1314,6 @@ export default function App() {
               });
             }
 
-            // 2. Handle direct string URLs from Firestore (docUrl or attachmentUrl)
             const singleDocUrl = quote.docUrl || quote.attachmentUrl;
             if (singleDocUrl && !docs.some((d: any) => d.url === singleDocUrl)) {
               docs.push({
@@ -1197,7 +1326,6 @@ export default function App() {
               } as any);
             }
 
-            // 3. Process notes array
             const tradeNotes: any[] = Array.isArray(curTrade.notes) ? [...curTrade.notes] : [];
             if (quote.notes && typeof quote.notes === 'string' && !tradeNotes.some((n: any) => n.text === quote.notes)) {
               tradeNotes.push({
@@ -1208,15 +1336,14 @@ export default function App() {
               });
             }
 
-            // 4. Update the existing trade row
             currentTrades[tradeIdx] = {
               ...curTrade,
               companyName: companyName,
               name: curTrade.name || companyName,
               contractorName: curTrade.contractorName || companyName,
-              quotedFigure: enteredAmount,
-              enteredAmount: enteredAmount,
-              amount: enteredAmount,
+              quotedFigure: resolvedFigure,
+              enteredAmount: resolvedFigure,
+              amount: resolvedFigure,
               actionItemStatus: quoteStatus,
               actionStatus: quoteStatus,
               status: quoteStatus,
@@ -1226,7 +1353,7 @@ export default function App() {
               docUrl: singleDocUrl || curTrade.docUrl,
               attachmentUrl: singleDocUrl || curTrade.attachmentUrl,
               notes: tradeNotes.length > 0 ? tradeNotes : (quote.notes || curTrade.notes),
-              quoteBreakdown: filteredBreakdowns,
+              quoteBreakdown: mergedBreakdowns,
               lastModifiedBy: quote.lastModifiedBy || quote.emailAddress || quote.email || companyName,
               updatedAt: quote.updatedAt || quote.submittedAt || new Date().toISOString()
             };
@@ -1236,12 +1363,13 @@ export default function App() {
               trades: currentTrades
             };
           }
+
         } else {
           projectScopesChanged = true;
           hasOverallChanges = true;
           (lastIngestedQuote as any) = quote;
 
-          const singleDocUrl = quote.docUrl || quote.attachmentUrl;
+          const singlDeDocUrl = quote.docUrl || quote.attachmentUrl;
           const initialDocs: any[] = [];
           if (Array.isArray(quote.attachedDocs) && quote.attachedDocs.length > 0) {
             quote.attachedDocs.forEach((qd: any) => {
@@ -1379,8 +1507,6 @@ export default function App() {
           incomingQuotes.push(rec);
         }
       });
-
-      setQuotes(incomingQuotes);
 
       setProjects((prevProjects) => {
         let currentWorkingProjects = prevProjects;
@@ -3645,7 +3771,17 @@ export default function App() {
                     setIsTradeModalOpen(true);
                   }}
                   onOpenNotes={(trade) => {
-                    setActiveTradeForNotes(trade);
+                    const safeNotes = Array.isArray(trade.notes)
+                      ? trade.notes
+                      : (trade.notes && typeof trade.notes === 'string')
+                        ? [{
+                          id: `note-${Date.now()}`,
+                          author: trade.companyName || trade.contractorName || 'Vendor',
+                          timestamp: new Date().toISOString(),
+                          text: trade.notes
+                        }]
+                        : [];
+                    setActiveTradeForNotes({ ...trade, notes: safeNotes });
                   }}
                   onOpenDocViewer={(trade) => {
                     setActiveTradeForDocs(trade);

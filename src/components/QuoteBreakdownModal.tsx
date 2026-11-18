@@ -98,13 +98,35 @@ export const QuoteBreakdownModal: React.FC<QuoteBreakdownModalProps> = ({
     }
   }, [isOpen, scope, trade]);
 
-  // Load existing quote breakdown or generate standard tender form breakdown
+  // Load existing quote breakdown or restore standard template if collapsed to a partial sub-item
   useEffect(() => {
     if (trade && scope && isOpen) {
-      if (trade.quoteBreakdown && trade.quoteBreakdown.length > 0) {
-        setItems(trade.quoteBreakdown);
+      const existing = Array.isArray(trade.quoteBreakdown) ? trade.quoteBreakdown : [];
+      const existingSum = existing
+        .filter((it) => it.inclusionStatus !== 'excluded')
+        .reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+      const defaults = generateDefaultBreakdownItems(scope.name, trade.quotedFigure, scope.budgetAmount);
+
+      if (existing.length === 1 && defaults.length > 1 && trade.quotedFigure > 0 && Math.abs(existingSum - trade.quotedFigure) > 0.01) {
+        // Preserve the known first sub-item amount (e.g. $7,338 Sloped Roof) and expand remaining template rows (Flat Roof / Garage Roof)
+        const firstAmt = Number(existing[0].amount) || 0;
+        const remainder = Math.max(0, trade.quotedFigure - firstAmt);
+        const remainingItems = defaults.slice(1);
+        const remainingWeight = remainingItems.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+
+        const expanded = defaults.map((def, idx) => {
+          if (idx === 0) {
+            return { ...def, amount: firstAmt, notes: existing[0].notes || def.notes };
+          }
+          const share = remainingWeight > 0
+            ? Math.round(((Number(def.amount) || 0) / remainingWeight) * remainder * 100) / 100
+            : Math.round((remainder / remainingItems.length) * 100) / 100;
+          return { ...def, amount: share };
+        });
+        setItems(expanded);
+      } else if (existing.length > 0) {
+        setItems(existing);
       } else {
-        const defaults = generateDefaultBreakdownItems(scope.name, trade.quotedFigure, scope.budgetAmount);
         setItems(defaults);
       }
       setIsAddingItem(false);
