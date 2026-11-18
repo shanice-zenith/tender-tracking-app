@@ -1,23 +1,23 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { 
-  X, 
-  Mail, 
-  Send, 
-  Calendar, 
-  Clock, 
-  Check, 
-  CheckSquare, 
-  Square, 
-  ExternalLink, 
-  Copy, 
-  Sparkles, 
-  FolderOpen, 
-  Users, 
-  Search, 
-  Building2, 
-  AlertTriangle, 
-  Eye, 
-  Code, 
+import {
+  X,
+  Mail,
+  Send,
+  Calendar,
+  Clock,
+  Check,
+  CheckSquare,
+  Square,
+  ExternalLink,
+  Copy,
+  Sparkles,
+  FolderOpen,
+  Users,
+  Search,
+  Building2,
+  AlertTriangle,
+  Eye,
+  Code,
   CheckCircle2,
   FileSpreadsheet,
   Lock,
@@ -37,6 +37,8 @@ import { formatScheduleDateDisplay } from '../services/scheduleQueueService';
 import { appsScriptService } from '../services/appsScriptService';
 import { googleAuthService } from '../services/googleAuthService';
 import { GoogleAuthButton } from './GoogleAuthButton';
+import { deduplicateContactsList } from '../utils/ContactMatcher';
+
 
 interface TenderInviteModalProps {
   isOpen: boolean;
@@ -78,7 +80,7 @@ export const TenderInviteModal: React.FC<TenderInviteModalProps> = ({
   // Configuration links state
   const defaultDriveLink = project?.driveLink || (project?.code ? `https://drive.google.com/drive/folders/plans-and-specs-${project.code.toLowerCase().replace(/[^a-z0-9]/g, '-')}` : '');
   const defaultFormLink = scope?.googleFormUrl || (scope?.id ? `https://docs.google.com/forms/d/e/tender-submit-${scope.id}/viewform` : '');
-  
+
   const [driveLink, setDriveLink] = useState(defaultDriveLink);
   const [formLink, setFormLink] = useState(defaultFormLink);
 
@@ -163,11 +165,10 @@ export const TenderInviteModal: React.FC<TenderInviteModalProps> = ({
   const [tenderDeadline, setTenderDeadline] = useState(getInitialDeadline());
   const [activeViewMode, setActiveViewMode] = useState<'configure' | 'preview_visual' | 'preview_html'>('configure');
   const [contactSearchQuery, setContactSearchQuery] = useState('');
-  const [showOnlyMatchingTrades, setShowOnlyMatchingTrades] = useState(true);
-  
+
   // Dispatch Mode: "send_now" vs "schedule"
   const [dispatchMode, setDispatchMode] = useState<'send_now' | 'schedule'>('send_now');
-  
+
   // Scheduled launch date state
   const getInitialScheduledDate = () => {
     if (scope?.scheduledInvite?.scheduledTime) {
@@ -210,64 +211,36 @@ export const TenderInviteModal: React.FC<TenderInviteModalProps> = ({
     }
   }, [isOpen, project?.id, scope?.id]);
 
-  // Derive matching trade keywords for intelligent contact pre-filtering
-  const scopeKeywords = useMemo(() => {
-    if (!scope) return [];
-    const sName = scope.name.toLowerCase();
-    const words = sName.split(/[\s,&/]+/).filter((w) => w.length > 2 && !['and', 'for', 'the', 'other'].includes(w));
-    return [sName, ...words];
-  }, [scope?.name]);
+  // Deduplicated directory list so duplicate contacts never appear in the invite picker
+  const directoryContacts = useMemo(() => {
+    return deduplicateContactsList(contacts).uniqueContacts;
+  }, [contacts]);
 
-  // Check if contact matches the scope
-  const isMatchingContact = (contact: Contact) => {
-    const contactCategories = [
-      contact.category || '',
-      ...(contact.categories || []),
-      ...(contact.trade_categories || []),
-      contact.company || '',
-      contact.name || ''
-    ].map((c) => c.toLowerCase());
-
-    return scopeKeywords.some((kw) =>
-      contactCategories.some((cat) => cat.includes(kw) || kw.includes(cat))
-    );
-  };
-
-  // Filtered contacts list
+  // Filtered contacts list (full directory searchable by name, company, category, or email)
   const filteredContacts = useMemo(() => {
-    return contacts.filter((c) => {
-      // Trade filter
-      if (showOnlyMatchingTrades && !isMatchingContact(c)) {
-        return false;
-      }
-      // Search filter
+    return directoryContacts.filter((c) => {
       if (contactSearchQuery.trim()) {
         const q = contactSearchQuery.toLowerCase();
-        const matchesName = c.name.toLowerCase().includes(q);
-        const matchesCompany = c.company.toLowerCase().includes(q);
-        const matchesEmail = c.email.toLowerCase().includes(q);
-        const matchesCat = (c.categories || [c.category]).some((cat) => cat.toLowerCase().includes(q));
+        const matchesName = (c.name || '').toLowerCase().includes(q);
+        const matchesCompany = (c.company || '').toLowerCase().includes(q);
+        const matchesEmail = (c.email || '').toLowerCase().includes(q);
+        const matchesCat = (c.categories || [c.category || '']).some((cat) =>
+          (cat || '').toLowerCase().includes(q)
+        );
         if (!matchesName && !matchesCompany && !matchesEmail && !matchesCat) {
           return false;
         }
       }
       return true;
     });
-  }, [contacts, showOnlyMatchingTrades, contactSearchQuery, scopeKeywords]);
+  }, [directoryContacts, contactSearchQuery]);
 
-  // Selected contact IDs (default to matching contacts who already have trades or are matched)
+  // Selected contact IDs: only pre-select contacts already explicitly added to this scope (never auto-guess trades)
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>(() => {
     if (!scope) return [];
-    const existingContactIdsInScope = scope.trades
+    return scope.trades
       .map((t) => t.contactId)
       .filter((id): id is string => Boolean(id));
-
-    if (existingContactIdsInScope.length > 0) {
-      return existingContactIdsInScope;
-    }
-
-    const matching = contacts.filter((c) => isMatchingContact(c)).map((c) => c.id);
-    return matching.slice(0, 5);
   });
 
   // Sync selected contact IDs when scope changes or modal opens
@@ -276,13 +249,7 @@ export const TenderInviteModal: React.FC<TenderInviteModalProps> = ({
       const existingContactIdsInScope = scope.trades
         .map((t) => t.contactId)
         .filter((id): id is string => Boolean(id));
-
-      if (existingContactIdsInScope.length > 0) {
-        setSelectedContactIds(existingContactIdsInScope);
-      } else {
-        const matching = contacts.filter((c) => isMatchingContact(c)).map((c) => c.id);
-        setSelectedContactIds(matching.slice(0, 5));
-      }
+      setSelectedContactIds(existingContactIdsInScope);
     }
   }, [isOpen, scope?.id]);
 
@@ -554,8 +521,8 @@ w. ${senderWebsite}`;
       });
 
       if (result !== false) {
-        const msg = typeof result === 'object' && result?.message 
-          ? result.message 
+        const msg = typeof result === 'object' && result?.message
+          ? result.message
           : isScheduled
             ? `Tender invitations scheduled for launch on ${scheduledDisplay || 'scheduled date'}`
             : `1 email dispatched to ${validEmails.length} contractors via BCC`;
@@ -576,7 +543,7 @@ w. ${senderWebsite}`;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
-      <div 
+      <div
         id="tender-invite-modal"
         className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[94vh]"
       >
@@ -617,11 +584,10 @@ w. ${senderWebsite}`;
             <button
               type="button"
               onClick={() => setActiveViewMode('configure')}
-              className={`px-3.5 py-2 text-xs font-bold rounded-t-lg transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${
-                activeViewMode === 'configure'
-                  ? 'border-emerald-500 text-emerald-700 bg-white shadow-xs'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
+              className={`px-3.5 py-2 text-xs font-bold rounded-t-lg transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${activeViewMode === 'configure'
+                ? 'border-emerald-500 text-emerald-700 bg-white shadow-xs'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
             >
               <Users className="w-3.5 h-3.5 text-emerald-600" />
               <span>Configure & Select Contractors</span>
@@ -633,11 +599,10 @@ w. ${senderWebsite}`;
             <button
               type="button"
               onClick={() => setActiveViewMode('preview_visual')}
-              className={`px-3.5 py-2 text-xs font-bold rounded-t-lg transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${
-                activeViewMode === 'preview_visual'
-                  ? 'border-emerald-500 text-emerald-700 bg-white shadow-xs'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
+              className={`px-3.5 py-2 text-xs font-bold rounded-t-lg transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${activeViewMode === 'preview_visual'
+                ? 'border-emerald-500 text-emerald-700 bg-white shadow-xs'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
             >
               <Eye className="w-3.5 h-3.5 text-blue-600" />
               <span>Live Email Preview</span>
@@ -646,11 +611,10 @@ w. ${senderWebsite}`;
             <button
               type="button"
               onClick={() => setActiveViewMode('preview_html')}
-              className={`px-3.5 py-2 text-xs font-bold rounded-t-lg transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${
-                activeViewMode === 'preview_html'
-                  ? 'border-emerald-500 text-emerald-700 bg-white shadow-xs'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
+              className={`px-3.5 py-2 text-xs font-bold rounded-t-lg transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${activeViewMode === 'preview_html'
+                ? 'border-emerald-500 text-emerald-700 bg-white shadow-xs'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
             >
               <Code className="w-3.5 h-3.5 text-purple-600" />
               <span>HTML Source Template</span>
@@ -705,11 +669,10 @@ w. ${senderWebsite}`;
                       Email Dispatch Engine: Google Gmail API
                     </span>
                   </div>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                    hasGoogleToken
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                      : 'bg-amber-100 text-amber-900 border-amber-300'
-                  }`}>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${hasGoogleToken
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                    : 'bg-amber-100 text-amber-900 border-amber-300'
+                    }`}>
                     {hasGoogleToken ? 'Gmail API Active' : 'Sign-In Required'}
                   </span>
                 </div>
@@ -792,12 +755,11 @@ w. ${senderWebsite}`;
                     <span>Dispatch Timing</span>
                   </span>
                   <div className="flex items-center gap-1 bg-slate-200/90 p-1 rounded-xl border border-slate-300">
-                    <label 
-                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg cursor-pointer transition-all text-xs ${
-                        dispatchMode === 'send_now'
-                          ? 'bg-white text-emerald-800 font-extrabold shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900 font-medium'
-                      }`}
+                    <label
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg cursor-pointer transition-all text-xs ${dispatchMode === 'send_now'
+                        ? 'bg-white text-emerald-800 font-extrabold shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900 font-medium'
+                        }`}
                     >
                       <input
                         type="radio"
@@ -811,12 +773,11 @@ w. ${senderWebsite}`;
                       <span>Send Immediately</span>
                     </label>
 
-                    <label 
-                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg cursor-pointer transition-all text-xs ${
-                        dispatchMode === 'schedule'
-                          ? 'bg-emerald-700 text-white font-extrabold shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900 font-medium'
-                      }`}
+                    <label
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg cursor-pointer transition-all text-xs ${dispatchMode === 'schedule'
+                        ? 'bg-emerald-700 text-white font-extrabold shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900 font-medium'
+                        }`}
                     >
                       <input
                         type="radio"
@@ -940,17 +901,10 @@ w. ${senderWebsite}`;
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowOnlyMatchingTrades(!showOnlyMatchingTrades)}
-                      className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-colors cursor-pointer ${
-                        showOnlyMatchingTrades
-                          ? 'bg-emerald-700 text-white border border-emerald-500'
-                          : 'bg-slate-800 text-slate-300 border border-slate-700'
-                      }`}
-                    >
-                      {showOnlyMatchingTrades ? `✓ Matching Trades Only` : `Show All Directory (${contacts.length})`}
-                    </button>
+                    <p className="font-semibold text-xs text-slate-600">No contractors found.</p>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Try clearing your search filter or add a new contact in the Directory.
+                    </p>
 
                     <button
                       type="button"
@@ -990,18 +944,17 @@ w. ${senderWebsite}`;
                       const isSelected = selectedContactIds.includes(contact.id);
                       const currentEmail = (customEmails[contact.id] !== undefined ? customEmails[contact.id] : contact.email) || '';
                       const isEmailMissing = !currentEmail.trim() || !currentEmail.includes('@');
-                      const isTradeMatch = isMatchingContact(contact);
+
 
                       return (
                         <div
                           key={contact.id}
                           id={`contractor-card-${contact.id}`}
                           onClick={() => handleToggleContact(contact.id)}
-                          className={`p-3 transition-all cursor-pointer select-none flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                            isSelected
-                              ? 'bg-emerald-50/70 border-l-4 border-l-emerald-600 ring-1 ring-emerald-500/20'
-                              : 'bg-slate-50/50 opacity-60 hover:opacity-85 hover:bg-slate-100/60'
-                          }`}
+                          className={`p-3 transition-all cursor-pointer select-none flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${isSelected
+                            ? 'bg-emerald-50/70 border-l-4 border-l-emerald-600 ring-1 ring-emerald-500/20'
+                            : 'bg-slate-50/50 opacity-60 hover:opacity-85 hover:bg-slate-100/60'
+                            }`}
                         >
                           <div className="flex items-start gap-3 flex-1 min-w-0">
                             <div className="pt-0.5 shrink-0">
@@ -1040,7 +993,7 @@ w. ${senderWebsite}`;
                           </div>
 
                           {/* Email Field with inline edit */}
-                          <div 
+                          <div
                             className="flex items-center gap-2 sm:w-72 shrink-0"
                             onClick={(e) => e.stopPropagation()}
                           >
@@ -1093,7 +1046,7 @@ w. ${senderWebsite}`;
 
                 <div className="space-y-1.5 text-xs text-slate-300">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-bold text-slate-400">From:</span> 
+                    <span className="font-bold text-slate-400">From:</span>
                     <span className="text-white font-bold">{activeSender.name}</span>
                     <span className="font-mono text-emerald-400">&lt;{activeSender.email}&gt;</span>
                   </div>
@@ -1311,12 +1264,11 @@ w. ${senderWebsite}`;
 
             {/* Dispatch Timing Selector: Radio 1 vs Radio 2 */}
             <div className="flex items-center gap-1 bg-slate-200/90 p-1 rounded-xl border border-slate-300">
-              <label 
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all text-xs ${
-                  dispatchMode === 'send_now'
-                    ? 'bg-white text-emerald-800 font-extrabold shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900 font-medium'
-                }`}
+              <label
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all text-xs ${dispatchMode === 'send_now'
+                  ? 'bg-white text-emerald-800 font-extrabold shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900 font-medium'
+                  }`}
                 title="Send invitations immediately"
               >
                 <input
@@ -1331,12 +1283,11 @@ w. ${senderWebsite}`;
                 <span>Send Immediately</span>
               </label>
 
-              <label 
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all text-xs ${
-                  dispatchMode === 'schedule'
-                    ? 'bg-emerald-700 text-white font-extrabold shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900 font-medium'
-                }`}
+              <label
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all text-xs ${dispatchMode === 'schedule'
+                  ? 'bg-emerald-700 text-white font-extrabold shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900 font-medium'
+                  }`}
                 title="Schedule for future execution date & time"
               >
                 <input
@@ -1370,11 +1321,10 @@ w. ${senderWebsite}`;
               id="send-tender-invitations-btn"
               onClick={handleDispatch}
               disabled={isDispatching || selectedCount === 0}
-              className={`px-5 py-2.5 disabled:opacity-50 text-white font-extrabold rounded-xl shadow-md transition-all cursor-pointer text-xs flex items-center gap-2 ${
-                dispatchMode === 'schedule'
-                  ? 'bg-emerald-800 hover:bg-emerald-900 border border-emerald-600'
-                  : 'bg-emerald-600 hover:bg-emerald-700'
-              }`}
+              className={`px-5 py-2.5 disabled:opacity-50 text-white font-extrabold rounded-xl shadow-md transition-all cursor-pointer text-xs flex items-center gap-2 ${dispatchMode === 'schedule'
+                ? 'bg-emerald-800 hover:bg-emerald-900 border border-emerald-600'
+                : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
             >
               {dispatchMode === 'schedule' ? (
                 <CalendarClock className={`w-4 h-4 text-emerald-200 ${isDispatching ? 'animate-spin' : ''}`} />
