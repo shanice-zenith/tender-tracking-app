@@ -1,22 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  X, 
-  Building2, 
-  FolderPlus, 
-  DollarSign, 
-  Layers, 
-  FileSpreadsheet, 
-  Sparkles, 
-  MapPin, 
-  User, 
-  Tag, 
+import {
+  X,
+  Building2,
+  FolderPlus,
+  DollarSign,
+  Layers,
+  FileSpreadsheet,
+  Sparkles,
+  MapPin,
+  User,
+  Tag,
   AlignLeft,
   Check,
   FolderOpen,
   Trash2
 } from 'lucide-react';
 import { Project, ProjectStatus, ProjectTemplateType } from '../types';
-import { generateScopesFromTemplate, MASTER_SCOPE_TEMPLATES } from '../data/projectTemplates';
+import { generateScopesFromTemplate, MASTER_SCOPE_TEMPLATES, ARKHAM_SCOPE_TEMPLATES } from '../data/projectTemplates';
 
 interface ProjectModalProps {
   isOpen: boolean;
@@ -91,7 +91,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
-      <div 
+      <div
         id="project-modal"
         className="bg-white w-full max-w-2xl rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150"
       >
@@ -106,8 +106,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                 {isEditing ? 'Edit Construction Project' : 'Create New Construction Project'}
               </h2>
               <p className="text-xs text-slate-400">
-                {isEditing 
-                  ? 'Update project credentials, client specifications, and target budget.' 
+                {isEditing
+                  ? 'Update project credentials, client specifications, and target budget.'
                   : 'Initialize a tender package workspace with custom or master templates.'}
               </p>
             </div>
@@ -238,15 +238,14 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
                 Scope Template Setup <span className="text-slate-400 font-normal lowercase">(you can freely edit, add, or remove scopes after)</span>
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* Master 5-Phase Template */}
                 <div
                   onClick={() => setTemplateType('master_5phase')}
-                  className={`p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
-                    templateType === 'master_5phase'
-                      ? 'border-blue-600 bg-blue-50/50 shadow-xs'
-                      : 'border-slate-200 bg-slate-50/70 hover:border-slate-300 hover:bg-slate-100/50'
-                  }`}
+                  className={`p-3.5 rounded-xl border-2 cursor-pointer transition-all ${templateType === 'master_5phase'
+                    ? 'border-blue-600 bg-blue-50/50 shadow-xs'
+                    : 'border-slate-200 bg-slate-50/70 hover:border-slate-300 hover:bg-slate-100/50'
+                    }`}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2">
@@ -268,15 +267,47 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                     Recommended • Fully Editable & Removable
                   </span>
                 </div>
+                {/* Arkham Place Custom 46-Package Template */}
+                <div
+                  onClick={() => {
+                    setTemplateType('arkham_place');
+                    if (!name.trim()) setName('Arkham Place - 2811 Centre St NW');
+                    if (!location.trim()) setLocation('2811 Centre St NW, Calgary, AB');
+                    if (code.startsWith('PRJ-')) setCode('ARK2811');
+                  }}
+                  className={`p-3.5 rounded-xl border-2 cursor-pointer transition-all ${templateType === 'arkham_place'
+                      ? 'border-emerald-600 bg-emerald-50/50 shadow-xs'
+                      : 'border-slate-200 bg-slate-50/70 hover:border-slate-300 hover:bg-slate-100/50'
+                    }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg">
+                        <Building2 className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-extrabold text-slate-900">Arkham Place (46 Forms)</span>
+                    </div>
+                    {templateType === 'arkham_place' && (
+                      <div className="w-4 h-4 bg-emerald-600 text-white rounded-full flex items-center justify-center">
+                        <Check className="w-3 h-3" />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-2 leading-relaxed">
+                    Pre-loads all <strong>{ARKHAM_SCOPE_TEMPLATES.length} Arkham Place packages</strong> with live Google Form URLs and detailed Scope of Work text for emails.
+                  </p>
+                  <span className="inline-block mt-2 text-[10px] font-bold text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded">
+                    2811 Centre St NW • Preloaded Forms
+                  </span>
+                </div>
 
                 {/* Blank Template */}
                 <div
                   onClick={() => setTemplateType('blank')}
-                  className={`p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
-                    templateType === 'blank'
-                      ? 'border-blue-600 bg-blue-50/50 shadow-xs'
-                      : 'border-slate-200 bg-slate-50/70 hover:border-slate-300 hover:bg-slate-100/50'
-                  }`}
+                  className={`p-3.5 rounded-xl border-2 cursor-pointer transition-all ${templateType === 'blank'
+                    ? 'border-blue-600 bg-blue-50/50 shadow-xs'
+                    : 'border-slate-200 bg-slate-50/70 hover:border-slate-300 hover:bg-slate-100/50'
+                    }`}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2">

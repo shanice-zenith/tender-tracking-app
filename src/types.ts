@@ -25,7 +25,7 @@ export type ProjectStatus =
   | 'Under Review'
   | 'Completed';
 
-export type ProjectTemplateType = 'master_5phase' | 'blank';
+export type ProjectTemplateType = 'master_5phase' | 'arkham_place' | 'blank';
 
 export interface Project {
   id: string;

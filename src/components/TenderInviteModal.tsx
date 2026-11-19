@@ -165,6 +165,12 @@ export const TenderInviteModal: React.FC<TenderInviteModalProps> = ({
   const [tenderDeadline, setTenderDeadline] = useState(getInitialDeadline());
   const [activeViewMode, setActiveViewMode] = useState<'configure' | 'preview_visual' | 'preview_html'>('configure');
   const [contactSearchQuery, setContactSearchQuery] = useState('');
+  const isArkhamProject = Boolean(
+    project?.name?.toLowerCase().includes('arkham') ||
+    project?.location?.toLowerCase().includes('2811 centre')
+  );
+  const [includeDetailedScope, setIncludeDetailedScope] = useState<boolean>(isArkhamProject);
+  const [detailedScopeText, setDetailedScopeText] = useState<string>(scope?.description || '');
 
   // Dispatch Mode: "send_now" vs "schedule"
   const [dispatchMode, setDispatchMode] = useState<'send_now' | 'schedule'>('send_now');
@@ -199,6 +205,12 @@ export const TenderInviteModal: React.FC<TenderInviteModalProps> = ({
     if (isOpen && project && scope) {
       setDriveLink(project.driveLink || `https://drive.google.com/drive/folders/plans-and-specs-${project.code.toLowerCase().replace(/[^a-z0-9]/g, '-')}`);
       setFormLink(scope.googleFormUrl || `https://docs.google.com/forms/d/e/tender-submit-${scope.id}/viewform`);
+      const arkhamMatch = Boolean(
+        project.name?.toLowerCase().includes('arkham') ||
+        project.location?.toLowerCase().includes('2811 centre')
+      );
+      setIncludeDetailedScope(arkhamMatch);
+      setDetailedScopeText(scope.description || '');
       setTenderDeadline(getInitialDeadline());
       const sched = getInitialScheduledDate();
       setScheduledIso(sched.iso);
@@ -322,11 +334,20 @@ export const TenderInviteModal: React.FC<TenderInviteModalProps> = ({
     const finalDeadline = tenderDeadline || 'TBD';
     const finalDriveLink = driveLink.trim() || '#';
     const finalFormLink = formLink.trim() || '#';
-
     const senderHeader = activeSender.name.toUpperCase();
     const senderRoleHtml = activeSender.role ? `${activeSender.role}<br>` : '';
     const senderEmail = activeSender.email;
     const senderWebsite = activeSender.website || 'thezenithgroup.ca';
+
+    const cleanDetailedScope = detailedScopeText.trim();
+    const detailedScopeHtml =
+      includeDetailedScope && cleanDetailedScope
+        ? `
+<h3 style="color: #3f512b;">Detailed Scope of Work</h3>
+<div style="background-color: #f8fafc; border-left: 4px solid #374131; padding: 12px 16px; margin: 12px 0 20px 0; border-radius: 4px; color: #1e293b; font-size: 13px; line-height: 1.6;">
+  ${cleanDetailedScope.replace(/\n/g, '<br>')}
+</div>`
+        : '';
 
     return `<p>Hello,</p>
 
@@ -338,6 +359,7 @@ export const TenderInviteModal: React.FC<TenderInviteModalProps> = ({
   <li><strong>Location:</strong> ${projectLocation}</li>
   <li><strong>Scope of Work:</strong> ${scopeName}</li>
 </ul>
+${detailedScopeHtml}
 
 <!-- Deadline Callout Box -->
 <div style="background-color: #fef2f2; border-left: 4px solid #dc2626; padding: 12px 16px; margin: 20px 0; border-radius: 4px;">
@@ -397,6 +419,11 @@ w. ${senderWebsite}`;
     const senderRoleText = activeSender.role ? `${activeSender.role}\n` : '';
     const senderEmail = activeSender.email;
     const senderWebsite = activeSender.website || 'thezenithgroup.ca';
+    const cleanDetailedScope = detailedScopeText.trim();
+    const detailedScopePlain =
+      includeDetailedScope && cleanDetailedScope
+        ? `\nDetailed Scope of Work:\n${cleanDetailedScope}\n`
+        : '';
 
     return `Hello,
 
@@ -406,6 +433,7 @@ Project Overview & Deadline:
 - Project Name: ${projectName} (${projectAbbreviation})
 - Location: ${projectLocation}
 - Scope of Work: ${scopeName}
+${detailedScopePlain}
 
 --------------------------------------------------
 ⚠️ SUBMISSION DEADLINE: ${finalDeadline}
@@ -885,6 +913,37 @@ w. ${senderWebsite}`;
                     </p>
                   </div>
                 </div>
+              </div>
+
+              {/* Detailed Scope of Work Toggle & Editor (Auto-enabled for Arkham Place) */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={includeDetailedScope}
+                      onChange={(e) => setIncludeDetailedScope(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="text-xs font-bold text-slate-800">
+                      Include Detailed Scope of Work in Tender Email
+                    </span>
+                  </label>
+                  {isArkhamProject && (
+                    <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 rounded-full">
+                      Arkham Place Default
+                    </span>
+                  )}
+                </div>
+                {includeDetailedScope && (
+                  <textarea
+                    rows={3}
+                    value={detailedScopeText}
+                    onChange={(e) => setDetailedScopeText(e.target.value)}
+                    placeholder="Detailed scope of work from the tender form..."
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                )}
               </div>
 
               {/* Contractor Selection Section */}

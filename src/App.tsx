@@ -63,7 +63,7 @@ import {
   ScopePackageImportRow,
   PhaseQuoteImportRow
 } from './services/bulkImportExportService';
-import { generateScopesFromTemplate } from './data/projectTemplates';
+import { generateScopesFromTemplate, generateArkhamScopesFromTemplate } from './data/projectTemplates';
 import { matchProjectCandidate, isProjectMatch } from './data/projectMatcher';
 import { CANONICAL_ZENITH_PROJECT_IDS } from './data/realZenithProjects';
 import { isExampleOrMockTerm } from './utils/projectValidation';
@@ -1213,13 +1213,23 @@ export default function App() {
         let scopeIdx = updatedScopes.findIndex((s) => {
           const sCode = String(s.costCode || getAccurateScopeCostCode(s.name) || '').trim();
           const sNameClean = (s.name || '').toLowerCase().trim();
+          const rawTradeClean = (quote.trade || quote.tenderItem || '').toLowerCase().trim();
           const expNameClean = (expectedScopeName || '').toLowerCase().trim();
 
-          // Match by name first so sub-items (like Garage Slab 21850) merge into the parent scope
+          // 1. Exact or normalized match against the incoming form/trade name (Arkham Place forms)
+          const normS = sNameClean.replace(/[^a-z0-9]/g, '');
+          const normRaw = rawTradeClean.replace(/[^a-z0-9]/g, '');
+          if (normS && normRaw && (normS === normRaw || normS.includes(normRaw) || normRaw.includes(normS))) {
+            return true;
+          }
+
+          // 2. Match by canonical template scope name
           if (expNameClean && (sNameClean === expNameClean || expNameClean.includes(sNameClean) || sNameClean.includes(expNameClean))) {
             return true;
           }
-          if (costCode && costCode !== '20000' && costCode !== 'unassigned') {
+
+          // 3. Match by specific cost code (ignoring generic 20000 / 99999 fallback codes)
+          if (costCode && costCode !== '20000' && costCode !== '99999' && costCode !== 'unassigned') {
             return sCode === costCode;
           }
           return false;
@@ -1847,9 +1857,12 @@ export default function App() {
       );
       persistProjectsAndSync(updatedProjects, `Updated project "${projectData.name}"`);
     } else {
-      const newScopes = templateType === 'blank'
-        ? []
-        : generateScopesFromTemplate(false);
+      const newScopes =
+        templateType === 'blank'
+          ? []
+          : templateType === 'arkham_place'
+            ? generateArkhamScopesFromTemplate()
+            : generateScopesFromTemplate(false);
 
       const newProjId = `prj-${Date.now()}`;
       const newProject: Project = {

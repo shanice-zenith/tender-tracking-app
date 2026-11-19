@@ -26,6 +26,7 @@ exports.onQuoteSubmitted = onDocumentWritten(
 
     const beforeData = event.data.before.exists ? event.data.before.data() : null;
     const quote = event.data.after.data();
+    if (quote.skipCloudNotification) return;
 
     if (beforeData) {
       const priceChanged =

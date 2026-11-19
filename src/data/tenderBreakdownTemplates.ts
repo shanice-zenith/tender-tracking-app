@@ -959,7 +959,7 @@ export function generateDefaultBreakdownItems(
     return specs.map((spec, index) => {
       const isLast = index === specs.length - 1;
       let lineAmount = Math.round(baseAmount * spec.percentageOfTotal);
-      
+
       // Ensure sum matches baseAmount precisely
       if (isLast && quotedTotal > 0) {
         lineAmount = Math.max(0, baseAmount - runningSum);
@@ -1134,3 +1134,194 @@ export function isQuoteMisassigned(trade: TradeEntry, scope: ScopeLineItem): boo
   return false;
 }
 
+// =========================================================================
+// ARKHAM PLACE (2811 CENTRE ST NW) — 46 TENDER FORMS & 69 EXACT LINE ITEMS
+// =========================================================================
+export const ARKHAM_FORM_LINE_ITEM_SPECS: Record<string, TenderFormItemSpec[]> = {
+  // Package 1A
+  "Demolition, Excavation, Other Earthworks & DSSP Install": [
+    { costCode: "20020", itemDescription: "Total for Demolition (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.25 },
+    { costCode: "20040", itemDescription: "Total for Excavation, Backfill and Rough Grading (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.40 },
+    { costCode: "20040", itemDescription: "Total for full DSSP install, gravel, coring, drain rock and inspection (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.35 }
+  ],
+  "Shoring": [
+    { costCode: "20050", itemDescription: "Total for Temporary Shoring as per PrairieGEO shoring design PGE26-07-14 – soldier piles, timber lagging & monitoring (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "DSSP Materials": [
+    { costCode: "20150", itemDescription: "Total for all DSSP Materials as per plans (Catch basins/storm tanks/manhole covers/Area Drains/Pipe/Hydrovex) - excl. GST", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Water & Offsite Services": [
+    { costCode: "20120", itemDescription: "Total for Water & Underground (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.75 },
+    { costCode: "12040", itemDescription: "Total for Permission to Permit (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.25 }
+  ],
+  "Foundation & Suspended Slabs": [
+    { costCode: "20202", itemDescription: "Total for Foundation and Footing Walls incl. elevator pit (cribbing, rebar, ladder packages, window buckouts, labour) - excl. GST", unit: "LS", defaultQty: 1, percentageOfTotal: 0.55 },
+    { costCode: "20210", itemDescription: "Total for Suspended Slabs – formwork/deck, rebar, concrete, placing & finishing as per structural (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.35 },
+    { costCode: "20350", itemDescription: "Total for concrete Window Well walls & bases (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.10 }
+  ],
+  "Basement Slab / Weeping & Gravel": [
+    { costCode: "20206", itemDescription: "Basement Slab (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.65 },
+    { costCode: "20204", itemDescription: "Weeping Tile, Gravel, Damp Proofing (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.35 }
+  ],
+  "Structural Steel": [
+    { costCode: "20340", itemDescription: "Total for Structural Steel & Misc. Metals (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Framing Materials": [
+    { costCode: "20310", itemDescription: "Total for full framing material package (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Exterior Doors & Windows": [
+    { costCode: "20410", itemDescription: "Total for all Exterior Doors (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.25 },
+    { costCode: "20420", itemDescription: "Total for all Windows (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.50 },
+    { costCode: "20420", itemDescription: "Total for Curtain Wall system incl. glazing, shop drawings & install (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.25 }
+  ],
+  "Building Envelope Sealant": [
+    { costCode: "20430", itemDescription: "Sealant for all necessary openings incl. curtain wall perimeters (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Elevator": [
+    { costCode: "21598", itemDescription: "Total for Elevator supply & install incl. cab, controls, inspection & permits (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Plumbing & Gas Rough-In and Final": [
+    { costCode: "20710", itemDescription: "Plumbing Rough-In & Final (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.45 },
+    { costCode: "20710", itemDescription: "Gas Rough-In & Final (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.20 },
+    { costCode: "20710", itemDescription: "Plumbing & Gas Permits (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.05 },
+    { costCode: "20720", itemDescription: "Total for Hydronic Heating – boilers, distribution & controls (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.30 }
+  ],
+  "Fire Protection / Sprinkler System": [
+    { costCode: "20730", itemDescription: "Total for Sprinkler System incl. design & drawings (supply & install) - excl. GST", unit: "LS", defaultQty: 1, percentageOfTotal: 0.80 },
+    { costCode: "20731", itemDescription: "Total for Fire Protection – standpipes, FD connection, extinguishers as required (excl. GST) - if applicable", unit: "LS", defaultQty: 1, percentageOfTotal: 0.20 }
+  ],
+  "Electrical Rough-in and Final": [
+    { costCode: "20810", itemDescription: "Electrical Rough-in & Final (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.85 },
+    { costCode: "20840", itemDescription: "Electrical Fire Alarm System (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.15 }
+  ],
+  "HVAC": [
+    { costCode: "20901", itemDescription: "Heating Rough-in & Final (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.65 },
+    { costCode: "20902", itemDescription: "Air Conditioning (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.35 }
+  ],
+
+  // Package 1B
+  "Framing Labour": [
+    { costCode: "20320", itemDescription: "Framing Labour total – all floors (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Interior Stairs": [
+    { costCode: "20330", itemDescription: "Interior Stairs (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Roofing": [
+    { costCode: "20520", itemDescription: "Total for Commercial Flat Roof – membrane system (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Decking": [
+    { costCode: "20530", itemDescription: "Total for Decking as per plans (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Rainware": [
+    { costCode: "20540", itemDescription: "Total for all Rainware, Downspouts and Gutters (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Exterior Finishing": [
+    { costCode: "20630", itemDescription: "Total for Exterior Finishing & Cladding (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.80 },
+    { costCode: "20640", itemDescription: "Total for Soffit & Fascia (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.20 }
+  ],
+  "Drywall & Insulation": [
+    { costCode: "21110", itemDescription: "Total for Drywall & Insulation (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Spray Foam": [
+    { costCode: "21130", itemDescription: "Total for Spray Foam (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Firestopping": [
+    { costCode: "21160", itemDescription: "Total for Firestopping at all rated assemblies & penetrations (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.45 },
+    { costCode: "21160", itemDescription: "Total for Spray-Applied Fireproofing to steel beams, joists & deck as per UL D902 (1 hr & 2 hr) - excl. GST", unit: "LS", defaultQty: 1, percentageOfTotal: 0.55 }
+  ],
+  "Interior Paint": [
+    { costCode: "21310", itemDescription: "Total for Interior Paint (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Cabinets & Built-Ins": [
+    { costCode: "21420", itemDescription: "Total for all Cabinets & Built-ins (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+
+  // Package 2 - Interior A
+  "Countertops": [
+    { costCode: "21570", itemDescription: "Total for all Countertops as per interior design details and specs (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.85 },
+    { costCode: "21510", itemDescription: "Total for all Sinks (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.15 }
+  ],
+  "Plumbing Fixtures": [
+    { costCode: "21510", itemDescription: "Plumbing Fixture total (excluding sinks) - excl. GST", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Lighting Fixtures": [
+    { costCode: "21520", itemDescription: "Total for all Light Fixtures (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Appliances": [
+    { costCode: "21010", itemDescription: "Total for all Appliances (for all units) & Delivery (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.85 },
+    { costCode: "21020", itemDescription: "Total for Appliance Install (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.15 }
+  ],
+  "Interior Railings": [
+    { costCode: "21580", itemDescription: "Total for interior railings as per spec (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Tile Material": [
+    { costCode: "21210", itemDescription: "Total for all tile material as per specs (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Flooring Material & Labour": [
+    { costCode: "21230", itemDescription: "Total for all flooring material (LVP, hardwood, carpet if applicable) as per specs (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.55 },
+    { costCode: "21240", itemDescription: "Supply and install Stair Nosings (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.10 },
+    { costCode: "21240", itemDescription: "Full Flooring installation (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.35 }
+  ],
+  "Specialty Flooring": [
+    { costCode: "21250", itemDescription: "Total for Specialty Flooring – supply & install as per specs (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+
+  // Package 2 - Interior B
+  "Finishing Materials": [
+    { costCode: "21550", itemDescription: "Full Finishing Material Package as per specs – interior doors, baseboards, mouldings, door/window casings etc. (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.70 },
+    { costCode: "21560", itemDescription: "Full Finishing Lockout Package as per specs – door levers, deadbolts, stops, bathroom accessories, closet hardware etc. (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.30 }
+  ],
+  "Finishing Labour": [
+    { costCode: "21430", itemDescription: "Total for Finishing Labour – install of doors, trim & lockout (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Tile Labour": [
+    { costCode: "21220", itemDescription: "Full Tile installation (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Interior Glass and Mirrors": [
+    { costCode: "21530", itemDescription: "Total for all Interior Glass (supply and install) - excl. GST", unit: "LS", defaultQty: 1, percentageOfTotal: 0.65 },
+    { costCode: "21540", itemDescription: "Total for all Mirrors (supply and install) - excl. GST", unit: "LS", defaultQty: 1, percentageOfTotal: 0.35 }
+  ],
+  "Signage": [
+    { costCode: "21594", itemDescription: "Total for Signage – suite numbers, wayfinding & commercial signage (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Accessibility Equipment": [
+    { costCode: "21595", itemDescription: "Total for Accessibility Equipment (supply & install) - excl. GST", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+
+  // Package 3 - Exterior & Garage
+  "Exterior Flatwork (Sidewalk, Aprons, etc.)": [
+    { costCode: "20207", itemDescription: "Total for all concrete driveways, aprons, curbs, sidewalks, walkways, patios, stoops, landings and equipment pads as per plans (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Exterior Railings": [
+    { costCode: "20650", itemDescription: "Total for Exterior Railings (supply and install) - excl. GST", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Mailbox / House Numbers": [
+    { costCode: "20680", itemDescription: "Total for Mailboxes & Building/Unit Numbers (supply and install) - excl. GST", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Bike Storage / Mobility Lockers": [
+    { costCode: "21860", itemDescription: "Total for Storage Mobility Lockers & Bicycle Racks (supply and install) - excl. GST", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ],
+  "Landscaping & Fencing": [
+    { costCode: "21610", itemDescription: "Total for Trees, Decorative Rock, Sod (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.65 },
+    { costCode: "21620", itemDescription: "Total for Fencing (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 0.35 }
+  ],
+  "Parking Lot Asphalt": [
+    { costCode: "21850", itemDescription: "Total for heavy-duty asphalt paving – 4-stall carport/parking area, painted lines & lane tie-in as per site plan (excl. GST)", unit: "LS", defaultQty: 1, percentageOfTotal: 1.0 }
+  ]
+};
+
+Object.entries(ARKHAM_FORM_LINE_ITEM_SPECS).forEach(([scopeName, specs]) => {
+  if (!TENDER_FORM_TEMPLATES[scopeName]) {
+    TENDER_FORM_TEMPLATES[scopeName] = specs;
+  } else {
+    const existingCodes = new Set(TENDER_FORM_TEMPLATES[scopeName].map((s) => s.costCode));
+    specs.forEach((s) => {
+      if (!existingCodes.has(s.costCode)) {
+        TENDER_FORM_TEMPLATES[scopeName].push(s);
+      }
+    });
+  }
+  if (!CANONICAL_TRADE_SCOPE_COST_CODES[scopeName] && specs[0]?.costCode) {
+    CANONICAL_TRADE_SCOPE_COST_CODES[scopeName] = specs[0].costCode;
+  }
+});
