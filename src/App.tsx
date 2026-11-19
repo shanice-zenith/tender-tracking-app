@@ -67,6 +67,11 @@ import { generateScopesFromTemplate } from './data/projectTemplates';
 import { matchProjectCandidate, isProjectMatch } from './data/projectMatcher';
 import { CANONICAL_ZENITH_PROJECT_IDS } from './data/realZenithProjects';
 import { isExampleOrMockTerm } from './utils/projectValidation';
+import {
+  normalizeCompanyKey,
+  findMatchingContact,
+  deduplicateContactsList
+} from './utils/contactMatcher';
 import { Header } from './components/Header';
 import { ProjectDashboard } from './components/ProjectDashboard';
 import { ProjectModal } from './components/ProjectModal';
@@ -1134,14 +1139,8 @@ export default function App() {
   useEffect(() => {
     if (!currentUser) return;
     const unsubscribe = dbService.subscribeToContacts((remoteContacts) => {
-      const { uniqueContacts, duplicateIdsToDelete } = deduplicateContactsList(remoteContacts);
-      setContacts(uniqueContacts);
-      storageService.saveContacts(uniqueContacts);
-
-      if (duplicateIdsToDelete.length > 0) {
-        dbService.deleteContacts(duplicateIdsToDelete).catch(() => { });
-        dbService.saveContacts(uniqueContacts).catch(() => { });
-      }
+      setContacts(remoteContacts);
+      storageService.saveContacts(remoteContacts);
     });
     return () => {
       if (unsubscribe) unsubscribe();
@@ -1189,13 +1188,8 @@ export default function App() {
               ? quote.enteredAmount
               : quote.amount || 0)
         ) || 0;
-        const rawCompanyName = (quote.companyName || quote.contractorName || 'Subtrade Contractor').trim();
-        const matchedDirectoryContact = findMatchingContact(
-          storageService.getContacts(),
-          rawCompanyName,
-          quote.emailAddress || quote.email
-        );
-        const companyName = matchedDirectoryContact?.company?.trim() || rawCompanyName;
+        const companyName = (quote.companyName || quote.contractorName || 'Subtrade Contractor').trim();
+        const compLower = companyName.toLowerCase();
 
         const templateInfo = findScopeTemplateByCostCode(costCode);
         const expectedScopeName = templateInfo ? templateInfo.scopeName : (quote.trade || quote.tenderItem || '');
@@ -1513,62 +1507,6 @@ export default function App() {
           };
           incomingQuotes.push(rec);
         }
-      });
-      setContacts((prevContacts) => {
-        let workingContacts = [...prevContacts];
-        let contactsChanged = false;
-        const newlyCreatedContacts: Contact[] = [];
-        const updatedExistingContacts: Contact[] = [];
-
-        incomingQuotes.forEach((q) => {
-          const submittedCompany = (q.companyName || q.contractorName || '').trim();
-          const submittedEmail = (q.emailAddress || q.email || '').trim();
-          if (!submittedCompany || submittedCompany.toLowerCase() === 'subtrade contractor') return;
-
-          const existingMatch = findMatchingContact(workingContacts, submittedCompany, submittedEmail);
-          if (existingMatch) {
-            const needsEmail = submittedEmail && submittedEmail.includes('@') && !existingMatch.email;
-            const needsPhone = q.phone && !existingMatch.phone;
-            if (needsEmail || needsPhone) {
-              const enriched: Contact = {
-                ...existingMatch,
-                email: needsEmail ? submittedEmail : existingMatch.email,
-                phone: needsPhone ? String(q.phone).trim() : existingMatch.phone
-              };
-              workingContacts = workingContacts.map((c) => (c.id === existingMatch.id ? enriched : c));
-              updatedExistingContacts.push(enriched);
-              contactsChanged = true;
-            }
-          } else {
-            const key = normalizeCompanyKey(submittedCompany);
-            if (!key) return;
-            const scopeCategory = (q.trade || q.tradeScope || q.tenderItem || 'General Contractor').trim();
-            const newContact: Contact = {
-              id: `cnt-${key}`,
-              name: submittedCompany,
-              company: submittedCompany,
-              category: scopeCategory,
-              categories: [scopeCategory],
-              trade_categories: [scopeCategory],
-              phone: String(q.phone || '').trim(),
-              email: submittedEmail,
-              notes: 'Added automatically from tender form submission',
-              createdAt: new Date().toISOString()
-            };
-            workingContacts.push(newContact);
-            newlyCreatedContacts.push(newContact);
-            contactsChanged = true;
-          }
-        });
-
-        if (contactsChanged) {
-          storageService.saveContacts(workingContacts);
-          if (newlyCreatedContacts.length > 0 || updatedExistingContacts.length > 0) {
-            dbService.saveContacts([...newlyCreatedContacts, ...updatedExistingContacts]).catch(() => { });
-          }
-          return workingContacts;
-        }
-        return prevContacts;
       });
 
       setProjects((prevProjects) => {
