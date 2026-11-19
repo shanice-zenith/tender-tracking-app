@@ -37,7 +37,7 @@ import { formatScheduleDateDisplay } from '../services/scheduleQueueService';
 import { appsScriptService } from '../services/appsScriptService';
 import { googleAuthService } from '../services/googleAuthService';
 import { GoogleAuthButton } from './GoogleAuthButton';
-import { deduplicateContactsList } from '../utils/ContactMatcher';
+import { deduplicateContactsList } from '../utils/contactMatcher';
 
 
 interface TenderInviteModalProps {

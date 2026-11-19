@@ -1,9 +1,5 @@
 import { Contact } from '../types';
 
-/**
- * Normalizes a company name for reliable matching across Google Forms, CSVs, and the Contact Directory.
- * Strips legal entity suffixes (Inc, Ltd, Corp, LLC, Co) and punctuation/whitespace.
- */
 export function normalizeCompanyKey(raw: string | undefined | null): string {
     if (!raw || typeof raw !== 'string') return '';
     const cleaned = raw
@@ -16,9 +12,6 @@ export function normalizeCompanyKey(raw: string | undefined | null): string {
     return raw.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
 }
 
-/**
- * Finds an existing Contact in the directory by normalized company name (or email fallback).
- */
 export function findMatchingContact(
     contacts: Contact[],
     companyName: string | undefined | null,
@@ -48,10 +41,6 @@ export function findMatchingContact(
     return null;
 }
 
-/**
- * Deduplicates a list of contacts by normalized company key (or email if company is blank),
- * merging categories, phone numbers, and emails into the richest primary record.
- */
 export function deduplicateContactsList(contacts: Contact[]): {
     uniqueContacts: Contact[];
     duplicateIdsToDelete: string[];
