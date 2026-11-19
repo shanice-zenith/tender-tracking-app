@@ -973,11 +973,6 @@ w. ${senderWebsite}`;
                                 {contact.company && contact.name && contact.company !== contact.name && (
                                   <span className="text-slate-500 text-[11px]">({contact.name})</span>
                                 )}
-                                {isTradeMatch && (
-                                  <span className="px-1.5 py-0.2 text-[9px] font-bold bg-emerald-100 text-emerald-800 rounded border border-emerald-200">
-                                    Trade Match
-                                  </span>
-                                )}
                               </div>
 
                               <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">

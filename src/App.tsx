@@ -48,7 +48,7 @@ import { storageService } from './services/storageService';
 import { sheetsSyncService } from './services/sheetsSyncService';
 import { masterSyncService } from './services/masterSyncService';
 import { dbService } from './services/databaseService';
-import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { persistQuoteAttachedDocsToFirestore, cleanupAllExpiredBlobDocumentsInFirestore, isDocExpired } from './services/fileUploadService';
 import { cleanupDuplicateAndMockScopesInFirestore } from './services/scopeCleanupService';
@@ -98,7 +98,6 @@ import { ApprovedPoExportModal } from './components/ApprovedPoExportModal';
 import { LoginGate } from './components/LoginGate';
 import { useIdleTimeout } from './hooks/useIdleTimeout';
 import { SessionTimeoutModal } from './components/SessionTimeoutModal';
-import { doc, deleteDoc, onSnapshot, collection } from 'firebase/firestore';
 import {
   BudgetMappingResult,
   generateBudgetTemplateCsv,
