@@ -119,9 +119,9 @@ import {
   processPendingQueue,
   getStoredScheduledJobs,
   deleteScheduledJob,
-  syncScheduledDispatchesToBackend
+  syncScheduledDispatchesToBackend,
+  syncRemoteScheduledJobs
 } from './services/scheduleQueueService';
-import { div } from 'motion/react-client';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<GoogleUserProfile | null>(() => googleAuthService.getCurrentUser());
@@ -1146,6 +1146,23 @@ export default function App() {
     };
   }, [currentUser]);
 
+  useEffect(() => {
+    if (!currentUser || !db) return;
+    const unsubscribe = onSnapshot(
+      collection(db, 'scheduled_emails'),
+      (snapshot) => {
+        const remoteJobs = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as ScheduledEmailJob)
+        }));
+        const synced = syncRemoteScheduledJobs(remoteJobs);
+        setScheduledJobsList(synced);
+      },
+      (err) => console.warn('[Firestore] scheduled_emails sync notice:', err)
+    );
+    return () => unsubscribe();
+  }, [currentUser]);
+
   // Core Quote Synchronization Engine
   const applyQuotesListToProjects = useCallback((
     incomingQuotes: FirestoreQuoteRecord[],
@@ -1706,20 +1723,22 @@ export default function App() {
 
   useEffect(() => {
     if (!currentUser) return;
-    const queueInterval = setInterval(() => {
-      const result = processPendingQueue(projects, contacts);
+    const queueInterval = setInterval(async () => {
+      const result = await processPendingQueue(projects, contacts);
       if (result.hasChanges) {
         setProjects(result.updatedProjects);
         storageService.saveProjects(result.updatedProjects);
+        dbService.saveProjects(result.updatedProjects);
+        refreshScheduledJobs();
         if (result.dispatchedJobs.length > 0) {
           const firstJob = result.dispatchedJobs[0];
           const jobLabel = firstJob.type === 'invitation' ? 'Tender Invitations' : 'Follow-up Reminders';
-          showToast(`Scheduled ${jobLabel} automatically dispatched for ${firstJob.scopeName}`);
+          showToast(`Scheduled ${jobLabel} dispatched for ${firstJob.scopeName}`);
         }
       }
-    }, 4000);
+    }, 10000);
     return () => clearInterval(queueInterval);
-  }, [projects, contacts]);
+  }, [currentUser, projects, contacts, refreshScheduledJobs]);
 
   const currentPhaseInfo = useMemo(() => {
     return PHASES.find((p) => p.id === activePhase) || PHASES[0];
@@ -2347,6 +2366,22 @@ export default function App() {
 
     if (isScheduled && scheduledIso) {
       const targetScope = currentProjectScopes.find((s) => s.id === scopeId);
+      const resolvedScheduledEmails = Array.from(
+        new Set(
+          selectedContactIds
+            .map((contactId) => {
+              const contact = updatedContacts.find((c) => c.id === contactId);
+              return (customEmails[contactId] || contact?.email || '').trim();
+            })
+            .filter((e) => e && e.includes('@') && e.toLowerCase() !== 'info@thezenithgroup.ca')
+        )
+      );
+
+      if (resolvedScheduledEmails.length === 0) {
+        showToast('No valid contractor email addresses found to schedule.');
+        return false;
+      }
+
       const scheduledJob: ScheduledEmailJob = {
         id: `job-inv-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         projectId: activeProject.id,
@@ -2358,10 +2393,13 @@ export default function App() {
         scheduledTimeDisplay: scheduledDisplay || scheduledIso,
         status: 'pending',
         selectedRecipientIds: selectedContactIds,
+        recipientEmails: resolvedScheduledEmails,
         customEmails: customEmails,
         driveLink: driveLink,
         formLink: formLink,
         tenderDeadline: tenderDeadline,
+        generatedHtml: generatedHtml,
+        generatedPlainText: generatedPlainText,
         senderName: senderName,
         senderEmail: senderEmail,
         ccEmails: ccEmails,
@@ -2743,21 +2781,40 @@ export default function App() {
 
     if (isScheduled && scheduledIso) {
       const targetScope = currentProjectScopes.find((s) => s.id === scopeId);
+      const resolvedScheduledEmails = Array.from(
+        new Set(
+          selectedContactIds
+            .map((contactId) => {
+              const contact = updatedContacts.find((c) => c.id === contactId);
+              return (customEmails[contactId] || contact?.email || '').trim();
+            })
+            .filter((e) => e && e.includes('@') && e.toLowerCase() !== 'info@thezenithgroup.ca')
+        )
+      );
+
+      if (resolvedScheduledEmails.length === 0) {
+        showToast('No valid contractor email addresses found to schedule.');
+        return false;
+      }
+
       const scheduledJob: ScheduledEmailJob = {
-        id: `job-rem-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        id: `job-inv-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         projectId: activeProject.id,
         projectName: activeProject.name,
         scopeId: scopeId,
         scopeName: targetScope?.name || 'Tender Scope',
-        type: 'reminder',
+        type: 'invitation',
         scheduledTime: scheduledIso,
         scheduledTimeDisplay: scheduledDisplay || scheduledIso,
         status: 'pending',
-        selectedRecipientIds: selectedTradeIds,
+        selectedRecipientIds: selectedContactIds,
+        recipientEmails: resolvedScheduledEmails,
         customEmails: customEmails,
         driveLink: driveLink,
         formLink: formLink,
         tenderDeadline: tenderDeadline,
+        generatedHtml: generatedHtml,
+        generatedPlainText: generatedPlainText,
         senderName: senderName,
         senderEmail: senderEmail,
         ccEmails: ccEmails,

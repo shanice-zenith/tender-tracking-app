@@ -1,29 +1,32 @@
 const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { initializeApp } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
 
 initializeApp();
+
+const DATABASE_ID = "ai-studio-tendertrackingap-9f434cfb-0357-4e18-b5cb-149e70c03d8a";
+const db = getFirestore(DATABASE_ID);
 
 // Zenith Google Workspace Email Dispatcher Webhook
 const APPS_SCRIPT_DISPATCHER =
   "https://script.google.com/a/macros/thezenithgroup.ca/s/AKfycby8WGdj9nbiZ7gILzjXL6FjjJJMbcPMR4OHB9S4oNk42VRfQXSYEBhxpTZ1zp37vjjx/exec";
 
 // Recipients list
-const RECIPIENT_EMAILS = "info@thezenithgroup.ca"                                                                                                                 ;
+const RECIPIENT_EMAILS = "info@thezenithgroup.ca";
 
 exports.onQuoteSubmitted = onDocumentWritten(
   {
     document: "quotes/{quoteId}",
-    database: "ai-studio-tendertrackingap-9f434cfb-0357-4e18-b5cb-149e70c03d8a",
+    database: DATABASE_ID,
     region: "us-west1"
   },
   async (event) => {
-    // Drop execution if the document was deleted
     if (!event.data.after.exists) return;
 
     const beforeData = event.data.before.exists ? event.data.before.data() : null;
     const quote = event.data.after.data();
 
-    // Deduplication check: only notify if it's a new quote, a revision, or if the figure changed
     if (beforeData) {
       const priceChanged =
         beforeData.quotedFigure !== quote.quotedFigure ||
@@ -130,6 +133,144 @@ exports.onQuoteSubmitted = onDocumentWritten(
       console.log(`[Notification Sent] Alert dispatched for quote ${event.params.quoteId}`);
     } catch (err) {
       console.error("[Notification Error] Failed to send email via dispatcher:", err);
+    }
+  }
+);
+
+// Automated 1-minute scheduler for queued tender invitations and follow-up reminders
+exports.processScheduledEmails = onSchedule(
+  {
+    schedule: "every 1 minutes",
+    region: "us-west1",
+    timeZone: "America/Edmonton"
+  },
+  async () => {
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const snapshot = await db
+      .collection("scheduled_emails")
+      .where("status", "==", "pending")
+      .get();
+
+    if (snapshot.empty) return;
+
+    for (const docSnap of snapshot.docs) {
+      const job = docSnap.data();
+      const scheduledMs = Date.parse(job.scheduledTime || "");
+      if (isNaN(scheduledMs) || scheduledMs > nowMs) continue;
+
+      // Atomically claim the job so neither another run nor an open browser can double-send
+      const claimed = await db.runTransaction(async (tx) => {
+        const fresh = await tx.get(docSnap.ref);
+        if (!fresh.exists || fresh.data().status !== "pending") return false;
+        tx.update(docSnap.ref, { status: "dispatching", updatedAt: nowIso });
+        return true;
+      });
+      if (!claimed) continue;
+
+      try {
+        const rawEmails = Array.isArray(job.recipientEmails) ? job.recipientEmails : [];
+        const cleanedBcc = Array.from(
+          new Set(
+            rawEmails
+              .map((e) => String(e || "").trim())
+              .filter((e) => e.includes("@") && e.toLowerCase() !== "info@thezenithgroup.ca")
+          )
+        );
+
+        if (cleanedBcc.length === 0) {
+          await docSnap.ref.update({
+            status: "cancelled",
+            errorMessage: "No valid contractor email addresses stored on scheduled job.",
+            updatedAt: new Date().toISOString()
+          });
+          continue;
+        }
+
+        const subject =
+          job.subject ||
+          (job.type === "reminder"
+            ? `Tender Follow-up: ${job.projectName || "Project"} - ${job.scopeName || "Scope"} Estimate Reminder`
+            : `Estimate Request: ${job.projectName || "Project"} - ${job.scopeName || "Scope"}`);
+
+        const htmlBody =
+          job.generatedHtml ||
+          `<p>Hello,</p><p>Please review the tender package for <strong>${job.projectName || "Project"} — ${job.scopeName || "Scope"}</strong> (Deadline: ${job.tenderDeadline || "TBD"}).</p><p><a href="${job.driveLink || "#"}">View Plans &amp; Specifications</a> | <a href="${job.formLink || "#"}">Submit Estimate</a></p>`;
+
+        const ccString = Array.isArray(job.ccEmails)
+          ? job.ccEmails.filter(Boolean).join(", ")
+          : String(job.ccEmails || "").trim();
+
+        const response = await fetch(APPS_SCRIPT_DISPATCHER, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            to: "info@thezenithgroup.ca",
+            subject,
+            htmlBody,
+            cc: ccString,
+            bcc: cleanedBcc,
+            bccArray: cleanedBcc
+          })
+        });
+
+        const respText = await response.text();
+        let parsed = {};
+        try {
+          parsed = JSON.parse(respText);
+        } catch (_) { }
+
+        const isSuccess =
+          response.ok &&
+          (parsed.status === "success" ||
+            parsed.result === "success" ||
+            parsed.status === "ok" ||
+            parsed.success === true ||
+            !parsed.error);
+
+        if (!isSuccess) {
+          throw new Error(parsed.message || parsed.error || respText || `HTTP ${response.status}`);
+        }
+
+        const dispatchedAt = new Date().toISOString();
+        await docSnap.ref.update({
+          status: "dispatched",
+          dispatchedAt,
+          updatedAt: dispatchedAt
+        });
+
+        // Update the scope pill on the project document so the UI badge clears automatically
+        if (job.projectId && job.scopeId) {
+          const projRef = db.collection("projects").doc(job.projectId);
+          const projSnap = await projRef.get();
+          if (projSnap.exists) {
+            const projData = projSnap.data();
+            const updatedScopes = (projData.scopes || []).map((s) => {
+              if (s.id !== job.scopeId) return s;
+              if (job.type === "reminder") {
+                return {
+                  ...s,
+                  scheduledReminder: { ...(s.scheduledReminder || job), status: "dispatched", dispatchedAt }
+                };
+              }
+              return {
+                ...s,
+                scheduledInvite: { ...(s.scheduledInvite || job), status: "dispatched", dispatchedAt }
+              };
+            });
+            await projRef.update({ scopes: updatedScopes, updatedAt: dispatchedAt });
+          }
+        }
+
+        console.log(`[Scheduled Dispatch] Sent ${job.type} job ${docSnap.id} to ${cleanedBcc.length} BCC recipients.`);
+      } catch (err) {
+        console.error(`[Scheduled Dispatch Error] Job ${docSnap.id}:`, err);
+        await docSnap.ref.update({
+          status: "pending",
+          lastError: String(err.message || err),
+          updatedAt: new Date().toISOString()
+        });
+      }
     }
   }
 );

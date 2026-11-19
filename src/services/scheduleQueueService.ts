@@ -1,8 +1,9 @@
 import { Project, ScopeLineItem, TradeEntry, Contact, ScheduledEmailJob, NoteItem } from '../types';
 import { appsScriptService } from './appsScriptService';
-import { doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, updateDoc, runTransaction } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { sanitizePayload } from './databaseService';
+
 
 const SCHEDULE_STORAGE_KEY = 'tender_tracker_scheduled_email_jobs_v4';
 
@@ -54,7 +55,7 @@ export function parseDeadlineStringToDate(deadlineStr: string, fallbackDaysFromN
 
   for (let i = 0; i < MONTH_NAMES_FULL.length; i++) {
     if (datePart.toLowerCase().includes(MONTH_NAMES_FULL[i].toLowerCase()) ||
-        datePart.toLowerCase().includes(MONTH_NAMES_SHORT[i].toLowerCase())) {
+      datePart.toLowerCase().includes(MONTH_NAMES_SHORT[i].toLowerCase())) {
       parsedMonthIndex = i;
       break;
     }
@@ -162,7 +163,17 @@ export function getStoredScheduledJobs(): ScheduledEmailJob[] {
     return [];
   }
 }
-
+export function syncRemoteScheduledJobs(remoteJobs: ScheduledEmailJob[]): ScheduledEmailJob[] {
+  const sorted = [...remoteJobs].sort(
+    (a, b) => new Date(b.createdAt || b.scheduledTime).getTime() - new Date(a.createdAt || a.scheduledTime).getTime()
+  );
+  try {
+    localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(sorted));
+  } catch (e) {
+    console.warn('Notice syncing remote scheduled jobs to storage:', e);
+  }
+  return sorted;
+}
 /**
  * Save / Update a scheduled job in persistent storage and Firestore
  */
@@ -340,24 +351,24 @@ export function deleteScheduledJob(jobId: string): ScheduledEmailJob[] {
  * 4. Marks job as dispatched
  * 5. Returns updated projects and list of newly dispatched jobs
  */
-export function processPendingQueue(
+export async function processPendingQueue(
   projects: Project[],
   contacts: Contact[]
-): {
+): Promise<{
   updatedProjects: Project[];
   dispatchedJobs: ScheduledEmailJob[];
   hasChanges: boolean;
-} {
+}> {
   const allJobs = getStoredScheduledJobs();
-  const nowTime = new Date().getTime();
-  const nowIso = new Date().toISOString();
+  const nowTime = Date.now();
+  const nowIso = new Date(nowTime).toISOString();
   const todayFormatted = nowIso.split('T')[0];
 
-  const pendingJobs = allJobs.filter(
+  const dueJobs = allJobs.filter(
     (job) => job.status === 'pending' && new Date(job.scheduledTime).getTime() <= nowTime
   );
 
-  if (pendingJobs.length === 0) {
+  if (dueJobs.length === 0) {
     return { updatedProjects: projects, dispatchedJobs: [], hasChanges: false };
   }
 
@@ -366,164 +377,210 @@ export function processPendingQueue(
   const newlyDispatchedJobs: ScheduledEmailJob[] = [];
   const updatedAllJobs = [...allJobs];
 
-  pendingJobs.forEach((job) => {
+  for (const job of dueJobs) {
+    // Atomically claim the Firestore job so browser + Cloud Function never send twice
+    if (db) {
+      try {
+        const jobRef = doc(db, 'scheduled_emails', job.id);
+        const claimed = await runTransaction(db, async (tx) => {
+          const snap = await tx.get(jobRef);
+          if (!snap.exists()) return true;
+          if (snap.data().status !== 'pending') return false;
+          tx.update(jobRef, { status: 'dispatching', updatedAt: nowIso });
+          return true;
+        });
+        if (!claimed) continue;
+      } catch (claimErr) {
+        console.warn('Scheduled job claim notice:', claimErr);
+      }
+    }
+
+    // Resolve BCC email addresses from stored recipientEmails or contact lookup
+    const resolvedEmails = new Set<string>(
+      (job.recipientEmails || []).map((e) => e.trim()).filter((e) => e.includes('@'))
+    );
+    if (resolvedEmails.size === 0) {
+      (job.selectedRecipientIds || []).forEach((id) => {
+        const custom = job.customEmails?.[id]?.trim();
+        if (custom && custom.includes('@')) {
+          resolvedEmails.add(custom);
+          return;
+        }
+        const contact = contacts.find((c) => c.id === id);
+        if (contact?.email && contact.email.includes('@')) {
+          resolvedEmails.add(contact.email.trim());
+        }
+      });
+    }
+
+    const bccRecipients = Array.from(resolvedEmails).filter(
+      (e) => e.toLowerCase() !== 'info@thezenithgroup.ca'
+    );
+
+    const subject =
+      (job as any).subject ||
+      (job.type === 'reminder'
+        ? `Tender Follow-up: ${job.projectName || 'Project'} - ${job.scopeName || 'Scope'} Estimate Reminder`
+        : `Estimate Request: ${job.projectName || 'Project'} - ${job.scopeName || 'Scope'}`);
+
+    const htmlBody =
+      job.generatedHtml ||
+      `<p>Hello,</p><p>Please review the tender package for <strong>${job.projectName || 'Project'} — ${job.scopeName || 'Scope'}</strong> (Deadline: ${job.tenderDeadline || 'TBD'}).</p><p><a href="${job.driveLink || '#'}">View Plans &amp; Specifications</a> | <a href="${job.formLink || '#'}">Submit Estimate</a></p>`;
+
+    const endpointUrl = appsScriptService.getEndpointUrl();
+    const dispatchRes = await appsScriptService.dispatchSingleBccBatch({
+      endpointUrl,
+      to: 'info@thezenithgroup.ca',
+      bccRecipients,
+      subject,
+      htmlBody,
+      cc: job.ccEmails || []
+    });
+
+    if (!dispatchRes.success && dispatchRes.dispatchedCount === 0) {
+      // Release claim back to pending so the next cycle retries
+      if (db) {
+        updateDoc(doc(db, 'scheduled_emails', job.id), {
+          status: 'pending',
+          updatedAt: new Date().toISOString()
+        }).catch(() => { });
+      }
+      continue;
+    }
+
     const targetProjectIndex = modifiedProjects.findIndex((p) => p.id === job.projectId);
-    if (targetProjectIndex === -1) {
-      // Mark as cancelled or skip
-      const jobIdx = updatedAllJobs.findIndex((j) => j.id === job.id);
-      if (jobIdx >= 0) updatedAllJobs[jobIdx] = { ...job, status: 'cancelled' };
-      return;
-    }
+    if (targetProjectIndex >= 0) {
+      const targetProject = modifiedProjects[targetProjectIndex];
+      const targetScopeIndex = targetProject.scopes.findIndex((s) => s.id === job.scopeId);
 
-    const targetProject = modifiedProjects[targetProjectIndex];
-    const targetScopeIndex = targetProject.scopes.findIndex((s) => s.id === job.scopeId);
-    if (targetScopeIndex === -1) {
-      const jobIdx = updatedAllJobs.findIndex((j) => j.id === job.id);
-      if (jobIdx >= 0) updatedAllJobs[jobIdx] = { ...job, status: 'cancelled' };
-      return;
-    }
+      if (targetScopeIndex >= 0) {
+        const targetScope = targetProject.scopes[targetScopeIndex];
+        const updatedTrades = [...targetScope.trades];
 
-    const targetScope = targetProject.scopes[targetScopeIndex];
-    const updatedTrades = [...targetScope.trades];
+        if (job.type === 'invitation') {
+          job.selectedRecipientIds.forEach((contactId) => {
+            const contact = contacts.find((c) => c.id === contactId);
+            if (!contact) return;
 
-    if (job.type === 'invitation') {
-      // 1. Process Scheduled Invitation
-      job.selectedRecipientIds.forEach((contactId) => {
-        const contact = contacts.find((c) => c.id === contactId);
-        if (!contact) return;
+            const tradeIndex = updatedTrades.findIndex(
+              (t) =>
+                (t.contactId && t.contactId === contactId) ||
+                t.companyName.toLowerCase() === contact.company.toLowerCase()
+            );
 
-        const tradeIndex = updatedTrades.findIndex(
-          (t) => (t.contactId && t.contactId === contactId) ||
-                 t.companyName.toLowerCase() === contact.company.toLowerCase()
-        );
+            const dispatchNote: NoteItem = {
+              id: `note-sched-inv-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+              text: `[AUTOMATED SCHEDULED LAUNCH] Tender invitation dispatched on ${todayFormatted} (Deadline: ${job.tenderDeadline}) from ${job.senderName || 'Zenith Estimating'}.`,
+              timestamp: nowIso,
+              author: 'Zenith Background Engine'
+            };
 
-        const dispatchNote: NoteItem = {
-          id: `note-sched-inv-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-          text: `[AUTOMATED SCHEDULED LAUNCH] Tender invitation automatically dispatched by scheduler on ${todayFormatted} (Deadline: ${job.tenderDeadline}) from ${job.senderName || 'Zenith Estimating'}. Status set to Estimate Requested.`,
-          timestamp: nowIso,
-          author: 'Zenith Background Engine'
-        };
+            if (tradeIndex >= 0) {
+              updatedTrades[tradeIndex] = {
+                ...updatedTrades[tradeIndex],
+                actionStatus: 'Estimate Requested',
+                hasBeenInvited: true,
+                notes: [dispatchNote, ...updatedTrades[tradeIndex].notes]
+              };
+            } else {
+              updatedTrades.push({
+                id: `t-${targetScope.id}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                scopeId: targetScope.id,
+                contactId: contact.id,
+                contractorName: contact.name,
+                companyName: contact.company,
+                category: contact.category || (contact.trade_categories && contact.trade_categories[0]) || targetScope.name,
+                quotedFigure: 0,
+                currency: 'CAD',
+                attachedDocs: [],
+                actionStatus: 'Estimate Requested',
+                poSent: false,
+                isAwarded: false,
+                hasBeenInvited: true,
+                notes: [dispatchNote]
+              });
+            }
+          });
 
-        if (tradeIndex >= 0) {
-          updatedTrades[tradeIndex] = {
-            ...updatedTrades[tradeIndex],
-            actionStatus: 'Estimate Requested',
-            notes: [dispatchNote, ...updatedTrades[tradeIndex].notes]
+          const updatedScopes = [...targetProject.scopes];
+          updatedScopes[targetScopeIndex] = {
+            ...targetScope,
+            googleFormUrl: job.formLink || targetScope.googleFormUrl,
+            tenderDeadline: job.tenderDeadline || targetScope.tenderDeadline,
+            trades: updatedTrades,
+            scheduledInvite: { ...job, status: 'dispatched', dispatchedAt: nowIso }
           };
-        } else {
-          const newTrade: TradeEntry = {
-            id: `t-${targetScope.id}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-            scopeId: targetScope.id,
-            contactId: contact.id,
-            contractorName: contact.name,
-            companyName: contact.company,
-            category: contact.category || (contact.trade_categories && contact.trade_categories[0]) || targetScope.name,
-            quotedFigure: 0,
-            currency: 'CAD',
-            attachedDocs: [],
-            actionStatus: 'Estimate Requested',
-            poSent: false,
-            isAwarded: false,
-            notes: [dispatchNote]
+          modifiedProjects[targetProjectIndex] = {
+            ...targetProject,
+            scopes: updatedScopes,
+            updatedAt: nowIso
           };
-          updatedTrades.push(newTrade);
+          projectsUpdated = true;
+        } else if (job.type === 'reminder') {
+          const auditedTrades = updatedTrades.map((trade) => {
+            if (!job.selectedRecipientIds.includes(trade.id) || !isTradeEligibleForReminder(trade)) {
+              return trade;
+            }
+            const reminderNote: NoteItem = {
+              id: `note-sched-rem-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+              text: `[AUTOMATED SCHEDULED REMINDER] Follow-up reminder dispatched on ${todayFormatted} (Deadline: ${job.tenderDeadline}) from ${job.senderName || 'Zenith Estimating'}.`,
+              timestamp: nowIso,
+              author: 'Zenith Background Engine'
+            };
+            return {
+              ...trade,
+              actionStatus: 'Follow-up Pending' as const,
+              notes: [reminderNote, ...trade.notes]
+            };
+          });
+
+          const updatedScopes = [...targetProject.scopes];
+          updatedScopes[targetScopeIndex] = {
+            ...targetScope,
+            googleFormUrl: job.formLink || targetScope.googleFormUrl,
+            tenderDeadline: job.tenderDeadline || targetScope.tenderDeadline,
+            trades: auditedTrades,
+            scheduledReminder: { ...job, status: 'dispatched', dispatchedAt: nowIso }
+          };
+          modifiedProjects[targetProjectIndex] = {
+            ...targetProject,
+            scopes: updatedScopes,
+            updatedAt: nowIso
+          };
+          projectsUpdated = true;
         }
-      });
-
-      const updatedScope: ScopeLineItem = {
-        ...targetScope,
-        googleFormUrl: job.formLink || targetScope.googleFormUrl,
-        tenderDeadline: job.tenderDeadline || targetScope.tenderDeadline,
-        trades: updatedTrades,
-        scheduledInvite: {
-          ...job,
-          status: 'dispatched',
-          dispatchedAt: nowIso
-        }
-      };
-
-      const updatedScopes = [...targetProject.scopes];
-      updatedScopes[targetScopeIndex] = updatedScope;
-      modifiedProjects[targetProjectIndex] = {
-        ...targetProject,
-        scopes: updatedScopes,
-        updatedAt: nowIso
-      };
-      projectsUpdated = true;
-
-    } else if (job.type === 'reminder') {
-      // 2. Process Scheduled Reminder with Target Audience Guard
-      let reminderCount = 0;
-      const auditedTrades = updatedTrades.map((trade) => {
-        if (!job.selectedRecipientIds.includes(trade.id)) return trade;
-
-        // Apply strict Target Audience Guard at execution time
-        if (!isTradeEligibleForReminder(trade)) {
-          // Contractor submitted quote in the meantime - skip reminder!
-          return trade;
-        }
-
-        reminderCount++;
-        const reminderNote: NoteItem = {
-          id: `note-sched-rem-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-          text: `[AUTOMATED SCHEDULED REMINDER] Follow-up reminder automatically dispatched on ${todayFormatted} (Urgent Deadline: ${job.tenderDeadline}) from ${job.senderName || 'Zenith Estimating'}. Status updated to Follow-up Pending.`,
-          timestamp: nowIso,
-          author: 'Zenith Background Engine'
-        };
-
-        return {
-          ...trade,
-          actionStatus: 'Follow-up Pending' as const,
-          notes: [reminderNote, ...trade.notes]
-        };
-      });
-
-      const updatedScope: ScopeLineItem = {
-        ...targetScope,
-        googleFormUrl: job.formLink || targetScope.googleFormUrl,
-        tenderDeadline: job.tenderDeadline || targetScope.tenderDeadline,
-        trades: auditedTrades,
-        scheduledReminder: {
-          ...job,
-          status: 'dispatched',
-          dispatchedAt: nowIso
-        }
-      };
-
-      const updatedScopes = [...targetProject.scopes];
-      updatedScopes[targetScopeIndex] = updatedScope;
-      modifiedProjects[targetProjectIndex] = {
-        ...targetProject,
-        scopes: updatedScopes,
-        updatedAt: nowIso
-      };
-      projectsUpdated = true;
+      }
     }
 
-    // Mark job as dispatched in storage
-    const jobIdx = updatedAllJobs.findIndex((j) => j.id === job.id);
     const dispatchedJob: ScheduledEmailJob = {
       ...job,
       status: 'dispatched',
       dispatchedAt: nowIso
     };
-    if (jobIdx >= 0) {
-      updatedAllJobs[jobIdx] = dispatchedJob;
-    }
-    newlyDispatchedJobs.push(dispatchedJob);
-  });
 
-  if (projectsUpdated) {
+    const jobIdx = updatedAllJobs.findIndex((j) => j.id === job.id);
+    if (jobIdx >= 0) updatedAllJobs[jobIdx] = dispatchedJob;
+    newlyDispatchedJobs.push(dispatchedJob);
+
+    if (db) {
+      setDoc(
+        doc(db, 'scheduled_emails', job.id),
+        sanitizePayload({ ...dispatchedJob, updatedAt: nowIso }),
+        { merge: true }
+      ).catch(() => { });
+    }
+  }
+
+  if (newlyDispatchedJobs.length > 0) {
     try {
       localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(updatedAllJobs));
-    } catch (e) {
-      console.warn('Notice syncing updated jobs to storage:', e);
-    }
+    } catch (_) { }
+    syncScheduledDispatchesToBackend(updatedAllJobs);
   }
 
   return {
     updatedProjects: modifiedProjects,
     dispatchedJobs: newlyDispatchedJobs,
-    hasChanges: projectsUpdated
+    hasChanges: projectsUpdated || newlyDispatchedJobs.length > 0
   };
 }
