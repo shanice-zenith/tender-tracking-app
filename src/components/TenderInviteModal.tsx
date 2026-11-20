@@ -1083,6 +1083,21 @@ w. ${senderWebsite}`;
             </div>
           )}
 
+          {activeViewMode !== 'configure' && dispatchMode === 'schedule' && (
+            <div className="mb-4">
+              <ScheduleLaunchPicker
+                scheduledIso={scheduledIso}
+                onScheduleChange={(iso, display) => {
+                  setScheduledIso(iso);
+                  setScheduledDisplay(display);
+                }}
+                accentColor="emerald"
+                tenderDeadline={tenderDeadline}
+                type="invitation"
+              />
+            </div>
+          )}
+
           {/* TAB 2: LIVE EMAIL PREVIEW */}
           {activeViewMode === 'preview_visual' && (
             <div className="space-y-4">
@@ -1146,7 +1161,27 @@ w. ${senderWebsite}`;
                     <strong>Scope of Work:</strong> {scope.name}
                   </li>
                 </ul>
-
+                {includeDetailedScope && detailedScopeText.trim() && (
+                  <div className="space-y-1.5 pt-1">
+                    <h3 className="font-bold text-sm tracking-tight" style={{ color: '#3f512b' }}>
+                      Detailed Scope of Work
+                    </h3>
+                    <div
+                      style={{
+                        backgroundColor: '#f8fafc',
+                        borderLeft: '4px solid #374131',
+                        padding: '12px 16px',
+                        borderRadius: '4px',
+                        color: '#1e293b',
+                        fontSize: '13px',
+                        lineHeight: 1.6,
+                        whiteSpace: 'pre-line'
+                      }}
+                    >
+                      {detailedScopeText.trim()}
+                    </div>
+                  </div>
+                )}
                 {/* Deadline Callout Box */}
                 <div style={{ backgroundColor: '#fef2f2', borderLeft: '4px solid #dc2626', padding: '12px 16px', margin: '16px 0', borderRadius: '4px' }}>
                   <p style={{ color: '#991b1b', fontWeight: 'bold', margin: 0, fontSize: '14px' }}>

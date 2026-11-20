@@ -164,20 +164,35 @@ export function getStoredScheduledJobs(): ScheduledEmailJob[] {
   }
 }
 export function syncRemoteScheduledJobs(remoteJobs: ScheduledEmailJob[]): ScheduledEmailJob[] {
-  const sorted = [...remoteJobs].sort(
+  const remoteIds = new Set(remoteJobs.map((j) => j.id));
+  const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+
+  // Keep freshly created local pending jobs until Firestore snapshot confirms them
+  const unconfirmedLocalPending = getStoredScheduledJobs().filter(
+    (localJob) =>
+      localJob.status === 'pending' &&
+      !remoteIds.has(localJob.id) &&
+      new Date(localJob.createdAt || 0).getTime() >= twoMinutesAgo
+  );
+
+  const merged = [...unconfirmedLocalPending, ...remoteJobs].sort(
     (a, b) => new Date(b.createdAt || b.scheduledTime).getTime() - new Date(a.createdAt || a.scheduledTime).getTime()
   );
+
   try {
-    localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(sorted));
+    localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(merged));
   } catch (e) {
     console.warn('Notice syncing remote scheduled jobs to storage:', e);
   }
-  return sorted;
+  return merged;
 }
+
 /**
- * Save / Update a scheduled job in persistent storage and Firestore
+ * Save / Update a scheduled job in persistent storage and await Firestore write
  */
-export function saveScheduledJob(job: ScheduledEmailJob): ScheduledEmailJob[] {
+export async function saveScheduledJob(
+  job: ScheduledEmailJob
+): Promise<{ success: boolean; jobs: ScheduledEmailJob[]; error?: string }> {
   const existing = getStoredScheduledJobs();
   const filtered = existing.filter((j) => j.id !== job.id);
   const updated = [job, ...filtered];
@@ -187,24 +202,29 @@ export function saveScheduledJob(job: ScheduledEmailJob): ScheduledEmailJob[] {
     console.warn('Notice saving scheduled email job to storage:', e);
   }
 
-  // Real-time Firestore write to scheduled_emails collection
   if (db) {
     try {
       const jobRef = doc(db, 'scheduled_emails', job.id);
-      setDoc(jobRef, sanitizePayload({
-        ...job,
-        updatedAt: new Date().toISOString()
-      }), { merge: true }).catch((err) => {
-        console.warn('Firestore scheduled_emails save notice:', err);
-      });
-    } catch (err) {
-      console.warn('Firestore scheduled_emails save error:', err);
+      await setDoc(
+        jobRef,
+        sanitizePayload({
+          ...job,
+          updatedAt: new Date().toISOString()
+        }),
+        { merge: true }
+      );
+    } catch (err: any) {
+      console.error('Firestore scheduled_emails save error:', err);
+      return {
+        success: false,
+        jobs: updated,
+        error: err?.message || 'Failed to save scheduled email to Firestore.'
+      };
     }
   }
 
-  // Auto-sync into Master Sheet Scheduled_Dispatches tab
   syncScheduledDispatchesToBackend(updated);
-  return updated;
+  return { success: true, jobs: updated };
 }
 
 /**

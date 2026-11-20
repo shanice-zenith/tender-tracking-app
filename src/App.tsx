@@ -2419,8 +2419,11 @@ export default function App() {
         createdAt: now
       };
 
-      saveScheduledJob(scheduledJob);
+      const saveRes = await saveScheduledJob(scheduledJob);
       refreshScheduledJobs();
+      if (!saveRes.success) {
+        showToast(`Warning: ${saveRes.error || 'Could not sync schedule to cloud.'}`);
+      }
 
       const updatedScopes = currentProjectScopes.map((scope) => {
         if (scope.id !== scopeId) return scope;
@@ -2794,34 +2797,35 @@ export default function App() {
 
     if (isScheduled && scheduledIso) {
       const targetScope = currentProjectScopes.find((s) => s.id === scopeId);
-      const resolvedScheduledEmails = Array.from(
+      const resolvedReminderEmails = Array.from(
         new Set(
-          selectedContactIds
-            .map((contactId) => {
-              const contact = updatedContacts.find((c) => c.id === contactId);
-              return (customEmails[contactId] || contact?.email || '').trim();
+          selectedTradeIds
+            .map((tradeId) => {
+              const trade = targetScope?.trades.find((t) => t.id === tradeId);
+              const contact = trade?.contactId ? updatedContacts.find((c) => c.id === trade.contactId) : undefined;
+              return (customEmails[tradeId] || contact?.email || trade?.contactEmail || '').trim();
             })
             .filter((e) => e && e.includes('@') && e.toLowerCase() !== 'info@thezenithgroup.ca')
         )
       );
 
-      if (resolvedScheduledEmails.length === 0) {
+      if (resolvedReminderEmails.length === 0) {
         showToast('No valid contractor email addresses found to schedule.');
         return false;
       }
 
       const scheduledJob: ScheduledEmailJob = {
-        id: `job-inv-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        id: `job-rem-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         projectId: activeProject.id,
         projectName: activeProject.name,
         scopeId: scopeId,
         scopeName: targetScope?.name || 'Tender Scope',
-        type: 'invitation',
+        type: 'reminder',
         scheduledTime: scheduledIso,
         scheduledTimeDisplay: scheduledDisplay || scheduledIso,
         status: 'pending',
-        selectedRecipientIds: selectedContactIds,
-        recipientEmails: resolvedScheduledEmails,
+        selectedRecipientIds: selectedTradeIds,
+        recipientEmails: resolvedReminderEmails,
         customEmails: customEmails,
         driveLink: driveLink,
         formLink: formLink,
@@ -2834,8 +2838,11 @@ export default function App() {
         createdAt: now
       };
 
-      saveScheduledJob(scheduledJob);
+      const saveRes = await saveScheduledJob(scheduledJob);
       refreshScheduledJobs();
+      if (!saveRes.success) {
+        showToast(`Warning: ${saveRes.error || 'Could not sync reminder to cloud.'}`);
+      }
 
       const updatedScopes = currentProjectScopes.map((scope) => {
         if (scope.id !== scopeId) return scope;
