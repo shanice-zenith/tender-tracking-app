@@ -563,6 +563,7 @@ w. ${senderWebsite}`;
       console.error('Failed to dispatch invitations:', err);
       setPostDispatchStatus(`Error: ${err?.message || 'Unable to schedule invitation.'}`);
     } finally {
+      setIsDispatching(false);
     }
   };
 
@@ -1439,4 +1440,4 @@ w. ${senderWebsite}`;
       </div>
     </div>
   );
-};
+}

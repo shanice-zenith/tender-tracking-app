@@ -3298,6 +3298,7 @@ export default function App() {
               setExportPoTargetProject(null);
             }}
             project={exportPoTargetProject}
+            contacts={contacts}
           />
         )}
         <ProjectModal
@@ -4292,6 +4293,7 @@ export default function App() {
               setExportPoTargetProject(null);
             }}
             project={exportPoTargetProject}
+            contacts={contacts}
           />
         )
       }

@@ -1,16 +1,21 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Project } from '../types';
+import { Project, Contact } from '../types';
 import { INITIAL_CONTACTS } from '../data/initialContacts';
+import { findMatchingContact } from '../utils/ContactMatcher';
+
+export type ExportPhaseGroup = 'Phase 1' | 'Phase 2' | 'Phase 3';
 
 export interface ApprovedPoEntry {
   tradeId: string;
   scopeId: string;
   phaseId: string;
+  phaseGroup: ExportPhaseGroup;
   companyName: string;
-  contractorName: string; // Kept for backwards compatibility
+  contractorName: string;
+  phone: string;
+  email: string;
   scopeOfWork: string;
-  costCode?: string;
   quotedFigure: number;
   status: string;
   poSent: boolean;
@@ -19,11 +24,10 @@ export interface ApprovedPoEntry {
   primaryDocUrl?: string;
 }
 
-// Known individual person contact names to strictly exclude from Company Name column
 const KNOWN_INDIVIDUAL_NAMES = new Set<string>([
   'isaac malok',
   'tyrell scott',
-  'john o\'boyle',
+  "john o'boyle",
   'anmolpreet singh',
   'dave',
   'joanne slack',
@@ -36,30 +40,27 @@ const KNOWN_INDIVIDUAL_NAMES = new Set<string>([
   'jane doe'
 ]);
 
-// Dynamically register all individual person names from INITIAL_CONTACTS
 INITIAL_CONTACTS.forEach((c) => {
   if (c.name && typeof c.name === 'string') {
     KNOWN_INDIVIDUAL_NAMES.add(c.name.trim().toLowerCase());
   }
 });
 
-/**
- * Strict Subtrade Business Name Field Resolution:
- * Priority Order:
- *  1. quote.companyName (or trade.companyName)
- *  2. quote.responses['Company Name'] or quote.responses['Company']
- *  3. Search quote.responses keys for any key containing "Company" (case-insensitive)
- *
- * Explicitly EXCLUDE individual person fields:
- *  - Do NOT display quote.contactName, quote.submittedBy, or individual person names (e.g. "Isaac Malok", "Tyrell Scott").
- *  - If no company name is found, fall back to "Business Name Pending" rather than showing a contact person's name.
- */
-export function resolveSubtradeBusinessName(quoteOrTrade: Record<string, unknown> | null | undefined): string {
+export function getExportPhaseGroup(phaseId: string): ExportPhaseGroup {
+  const clean = String(phaseId || '').trim().toUpperCase();
+  if (clean.startsWith('2')) return 'Phase 2';
+  if (clean.startsWith('3')) return 'Phase 3';
+  return 'Phase 1';
+}
+
+export function resolveSubtradeBusinessName(
+  quoteOrTrade: Record<string, unknown> | null | undefined,
+  contacts: Contact[] = []
+): string {
   if (!quoteOrTrade || typeof quoteOrTrade !== 'object') {
     return 'Business Name Pending';
   }
 
-  // Gather individual person fields from this record to strictly exclude
   const excludedPersonValues = new Set<string>();
   const addExclusion = (val: unknown) => {
     if (typeof val === 'string' && val.trim()) {
@@ -79,11 +80,9 @@ export function resolveSubtradeBusinessName(quoteOrTrade: Record<string, unknown
     if (!trimmed) return false;
     const lower = trimmed.toLowerCase();
 
-    // Explicitly reject known contact persons and individual person fields
     if (KNOWN_INDIVIDUAL_NAMES.has(lower)) return false;
     if (excludedPersonValues.has(lower)) return false;
 
-    // Reject generic placeholders
     if (
       lower === 'unassigned subtrade' ||
       lower === 'unnamed contractor' ||
@@ -97,30 +96,17 @@ export function resolveSubtradeBusinessName(quoteOrTrade: Record<string, unknown
     return true;
   };
 
-  // 1. Check quote.companyName
   if (isValidBusinessName(quoteOrTrade.companyName)) {
     return (quoteOrTrade.companyName as string).trim();
   }
 
-  // Responses object from form submissions / webhooks
   const responses = (quoteOrTrade.responses || quoteOrTrade.response) as Record<string, unknown> | undefined;
-
   if (responses && typeof responses === 'object') {
-    // 2. quote.responses['Company Name'] or quote.responses['Company']
-    if (isValidBusinessName(responses['Company Name'])) {
-      return (responses['Company Name'] as string).trim();
+    for (const key of ['Company Name', 'Company', 'company_name', 'company']) {
+      if (isValidBusinessName(responses[key])) {
+        return (responses[key] as string).trim();
+      }
     }
-    if (isValidBusinessName(responses['Company'])) {
-      return (responses['Company'] as string).trim();
-    }
-    if (isValidBusinessName(responses['company_name'])) {
-      return (responses['company_name'] as string).trim();
-    }
-    if (isValidBusinessName(responses['company'])) {
-      return (responses['company'] as string).trim();
-    }
-
-    // 3. Search quote.responses keys for any key containing "Company" (case-insensitive)
     for (const [key, val] of Object.entries(responses)) {
       if (/company/i.test(key) && isValidBusinessName(val)) {
         return (val as string).trim();
@@ -128,23 +114,51 @@ export function resolveSubtradeBusinessName(quoteOrTrade: Record<string, unknown
     }
   }
 
-  // Supplementary: Check if trade.contactId links to a contact record with a valid company
+  const allContacts = [...contacts, ...INITIAL_CONTACTS];
   if (quoteOrTrade.contactId && typeof quoteOrTrade.contactId === 'string') {
-    const matchedContact = INITIAL_CONTACTS.find((c) => c.id === quoteOrTrade.contactId);
+    const matchedContact = allContacts.find((c) => c.id === quoteOrTrade.contactId);
     if (matchedContact && isValidBusinessName(matchedContact.company)) {
       return matchedContact.company.trim();
     }
   }
 
-  // Fallback: If no company name is found, fall back to "Business Name Pending"
   return 'Business Name Pending';
 }
 
+function resolveContractorContactDetails(
+  trade: Record<string, unknown>,
+  businessName: string,
+  contacts: Contact[] = []
+): { phone: string; email: string } {
+  const allContacts = [...contacts, ...INITIAL_CONTACTS];
+
+  const directPhone = String(trade.contactPhone || trade.phone || '').trim();
+  const directEmail = String(trade.contactEmail || trade.email || '').trim();
+
+  const byId =
+    typeof trade.contactId === 'string' && trade.contactId
+      ? allContacts.find((c) => c.id === trade.contactId)
+      : null;
+
+  const byMatch =
+    byId ||
+    findMatchingContact(
+      allContacts,
+      businessName !== 'Business Name Pending' ? businessName : String(trade.contractorName || ''),
+      directEmail
+    );
+
+  return {
+    phone: directPhone || byMatch?.phone?.trim() || '—',
+    email: directEmail || byMatch?.email?.trim() || '—'
+  };
+}
+
 /**
- * Filter the current project's quotes to include ONLY entries where a Purchase Order has been issued
- * (poSent === true or status contains "PO Sent" / "PO Approved").
+ * Filter the current project's quotes to include ONLY entries where a Purchase Order has been issued.
+ * Strips cost codes and sub-packages, grouping cleanly into Phase 1, Phase 2, and Phase 3.
  */
-export function getApprovedPoEntries(project: Project): ApprovedPoEntry[] {
+export function getApprovedPoEntries(project: Project, contacts: Contact[] = []): ApprovedPoEntry[] {
   const results: ApprovedPoEntry[] = [];
   if (!project || !Array.isArray(project.scopes)) return results;
 
@@ -152,10 +166,11 @@ export function getApprovedPoEntries(project: Project): ApprovedPoEntry[] {
     if (!Array.isArray(scope.trades)) return;
 
     scope.trades.forEach((trade) => {
+      const tradeAny = trade as unknown as Record<string, unknown>;
       const statusStr = String(
         trade.actionStatus ||
-        (trade as unknown as Record<string, unknown>).actionItemStatus ||
-        (trade as unknown as Record<string, unknown>).status ||
+        tradeAny.actionItemStatus ||
+        tradeAny.status ||
         ''
       );
 
@@ -165,64 +180,57 @@ export function getApprovedPoEntries(project: Project): ApprovedPoEntry[] {
         statusStr.toLowerCase().includes('po approved');
 
       if (isPoIssued) {
-        // Format Scope of Work: e.g. "Demolition - Code 20020" or "Demolition"
-        const rawCostCode = scope.costCode || trade.costCode || '';
-        const cleanCode = rawCostCode
-          ? rawCostCode.replace(/^(cost\s*code|code)\s*:?\s*/i, '').trim()
-          : '';
-        const scopeTitle = scope.name || 'General Scope';
-        const scopeOfWork = cleanCode
-          ? `${scopeTitle} - Code ${cleanCode}`
-          : scopeTitle;
+        // Clean scope title without cost codes or sub-package labels
+        const scopeOfWork = (scope.name || 'General Scope')
+          .replace(/\s*[-–]\s*(?:cost\s*)?code\s*:?\s*\d+\s*$/i, '')
+          .trim();
 
-        // Attached Documents
+        // Attached Estimates
         const docs: Array<{ name: string; url: string }> = [];
-
         if (Array.isArray(trade.attachedDocs)) {
           trade.attachedDocs.forEach((doc) => {
             if (doc && (doc.name || doc.url)) {
               docs.push({
-                name: doc.name || 'Quote_Document.pdf',
+                name: doc.name || 'Estimate_Document.pdf',
                 url: doc.url || ''
               });
             }
           });
         }
 
-        const tradeAny = trade as unknown as Record<string, unknown>;
         if (trade.docUrl && !docs.some((d) => d.url === trade.docUrl)) {
           docs.push({
-            name: trade.docName || (tradeAny.attachedDoc as string) || trade.docUrl.split('/').pop()?.split('?')[0] || 'Approved_PO_Quote.pdf',
+            name:
+              trade.docName ||
+              (tradeAny.attachedDoc as string) ||
+              trade.docUrl.split('/').pop()?.split('?')[0] ||
+              'Approved_Estimate.pdf',
             url: trade.docUrl
           });
         } else if (trade.docName && docs.length === 0) {
-          docs.push({
-            name: trade.docName,
-            url: ''
-          });
+          docs.push({ name: trade.docName, url: '' });
         } else if (tradeAny.attachedDoc && docs.length === 0) {
-          docs.push({
-            name: tradeAny.attachedDoc as string,
-            url: ''
-          });
+          docs.push({ name: tradeAny.attachedDoc as string, url: '' });
         }
 
-        // Strictly resolve Subtrade Business Name (excluding contact persons)
-        const businessName = resolveSubtradeBusinessName(tradeAny);
+        const businessName = resolveSubtradeBusinessName(tradeAny, contacts);
+        const { phone, email } = resolveContractorContactDetails(tradeAny, businessName, contacts);
 
         results.push({
           tradeId: trade.id,
           scopeId: scope.id,
           phaseId: scope.phaseId,
+          phaseGroup: getExportPhaseGroup(scope.phaseId),
           companyName: businessName,
-          contractorName: businessName, // Sync for backwards compatibility
-          scopeOfWork: scopeOfWork,
-          costCode: cleanCode,
+          contractorName: businessName,
+          phone,
+          email,
+          scopeOfWork,
           quotedFigure: trade.quotedFigure || 0,
           status: statusStr || (trade.poSent ? 'PO Sent' : 'PO Approved'),
           poSent: trade.poSent,
           attachedDocs: docs,
-          attachedDocsDisplay: docs.length > 0 ? docs.map((d) => d.name).join(', ') : 'No document attached',
+          attachedDocsDisplay: docs.length > 0 ? docs.map((d) => d.name).join(', ') : 'No estimate attached',
           primaryDocUrl: docs.length > 0 && docs[0].url ? docs[0].url : undefined
         });
       }
@@ -232,172 +240,141 @@ export function getApprovedPoEntries(project: Project): ApprovedPoEntry[] {
   return results;
 }
 
-/**
- * Draw the official Zenith Group Header Logo onto the jsPDF document.
- * Matches ZenithLogoArtboard 1@4x.png:
- * Bold Roman serif wordmark "Z E N I T H" with tracked "G R O U P" underneath.
- */
-function drawZenithGroupLogo(doc: jsPDF, originX: number, originY: number): void {
-  // Wordmark: Z E N I T H (Classical bold serif)
-  doc.setTextColor(10, 10, 10);
-  doc.setFont('times', 'bold');
-  doc.setFontSize(24);
-  doc.text('Z E N I T H', originX, originY + 8);
-
-  // Subtitle: G R O U P (Clean architectural wide-tracked sans-serif)
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(23, 23, 23);
-  doc.text('G   R   O   U   P', originX + 11.5, originY + 14.5);
+export function groupApprovedEntriesByPhase(entries: ApprovedPoEntry[]): Array<{
+  phaseTitle: ExportPhaseGroup;
+  entries: ApprovedPoEntry[];
+}> {
+  const phases: ExportPhaseGroup[] = ['Phase 1', 'Phase 2', 'Phase 3'];
+  return phases.map((phaseTitle) => ({
+    phaseTitle,
+    entries: entries.filter((item) => item.phaseGroup === phaseTitle)
+  }));
 }
 
 /**
- * Generate and download a PDF report containing the approved PO list.
- * Formats strictly into 3 columns:
- * 1. Company Name (Subtrade Business Name)
- * 2. Scope of Work (Scope title and cost code)
- * 3. Attached Documents (Direct link or filename)
+ * Generate and download a clean PDF report split into Phase 1, Phase 2, and Phase 3.
+ * Columns per line item:
+ * 1. Scope of Work
+ * 2. Contractor / Supplier Name
+ * 3. Phone Number
+ * 4. Email
+ * 5. Attached Estimate
  */
-export function exportApprovedPoListPdf(project: Project): void {
-  const entries = getApprovedPoEntries(project);
+export function exportApprovedPoListPdf(project: Project, contacts: Contact[] = []): void {
+  const entries = getApprovedPoEntries(project, contacts);
+  const groupedPhases = groupApprovedEntriesByPhase(entries);
+
   const doc = new jsPDF({
-    orientation: 'portrait',
+    orientation: 'landscape',
     unit: 'mm',
     format: 'a4'
   });
 
   const pageWidth = doc.internal.pageSize.getWidth();
-  const today = new Date().toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  });
 
-  // Top Page Header: Official Zenith Group Logo
-  drawZenithGroupLogo(doc, 14, 12);
-
-  // Header Right Metadata: Date & Confidential internal tag
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
-  doc.setTextColor(100, 116, 139); // slate-500
-  doc.text('ESTIMATING & PROCUREMENT • INTERNAL REPORT', pageWidth - 14, 14, { align: 'right' });
+  // Clean Project Title Header (no logo, client, internal report label, export date, or project code)
+  doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(30, 41, 59); // slate-800
-  doc.text(`EXPORT DATE: ${today.toUpperCase()}`, pageWidth - 14, 19, { align: 'right' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
-  doc.setTextColor(100, 116, 139);
-  doc.text(`PROJECT: ${project.code || 'PRJ'}`, pageWidth - 14, 23.5, { align: 'right' });
+  doc.setFontSize(15);
+  doc.text(`${project.name} — Approved Purchase Orders & Scopes`, 14, 16);
 
-  // Elegant divider line below brand header
-  doc.setDrawColor(226, 232, 240); // slate-200
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(71, 85, 105);
+  const subtitleParts: string[] = [];
+  if (project.location) subtitleParts.push(`Location: ${project.location}`);
+  subtitleParts.push(`Approved POs: ${entries.length}`);
+  doc.text(subtitleParts.join('   |   '), 14, 22);
+
+  doc.setDrawColor(226, 232, 240);
   doc.setLineWidth(0.4);
-  doc.line(14, 30, pageWidth - 14, 30);
+  doc.line(14, 26, pageWidth - 14, 26);
 
-  // Document Title Section
-  doc.setTextColor(15, 23, 42); // slate-900
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  const title = `${project.name} — Approved Purchase Orders & Scopes`;
-  doc.text(title, 14, 39);
+  let currentY = 32;
 
-  // Subtitle / Scope details
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(71, 85, 105); // slate-600
-  doc.text(
-    `Client: ${project.client || 'Zenith Developments'}   |   Location: ${project.location || 'Active Site'}   |   Approved POs: ${entries.length}`,
-    14,
-    45
-  );
+  groupedPhases.forEach(({ phaseTitle, entries: phaseEntries }) => {
+    if (currentY > doc.internal.pageSize.getHeight() - 35) {
+      doc.addPage();
+      currentY = 16;
+    }
 
-  // Strictly 3 Columns:
-  // Column 1: Company Name -> Subtrade Business Name (e.g. "Solai Contracting", "Precision Underground Services")
-  // Column 2: Scope of Work -> Scope title and cost code (e.g. "Demolition - Code 20020")
-  // Column 3: Attached Documents -> Document filename / links (e.g. "2026_06_16_Solai_Quote.pdf")
-  const tableRows = entries.map((item) => {
-    return [
-      item.companyName,
-      item.scopeOfWork,
-      item.attachedDocsDisplay
-    ];
-  });
+    // Phase Section Header (Phase 1 / Phase 2 / Phase 3)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`${phaseTitle} (${phaseEntries.length})`, 14, currentY);
+    currentY += 3;
 
-  if (tableRows.length === 0) {
-    tableRows.push([
-      'No approved Purchase Orders found',
-      'Ensure quotes have poSent=true or status "PO Sent / PO Approved"',
-      '—'
-    ]);
-  }
+    const tableRows =
+      phaseEntries.length > 0
+        ? phaseEntries.map((item) => [
+          item.scopeOfWork,
+          item.companyName,
+          item.phone,
+          item.email,
+          item.attachedDocsDisplay
+        ])
+        : [['No approved purchase orders in this phase', '—', '—', '—', '—']];
 
-  // Draw Strictly 3-Column Table
-  autoTable(doc, {
-    startY: 50,
-    head: [['Company Name', 'Scope of Work', 'Attached Documents']],
-    body: tableRows,
-    theme: 'grid',
-    headStyles: {
-      fillColor: [15, 23, 42], // slate-900
-      textColor: [255, 255, 255],
-      fontStyle: 'bold',
-      fontSize: 9,
-      cellPadding: 3.5
-    },
-    styles: {
-      font: 'helvetica',
-      fontSize: 8.5,
-      textColor: [30, 41, 59],
-      cellPadding: 3.5,
-      lineColor: [226, 232, 240],
-      lineWidth: 0.2,
-      valign: 'middle'
-    },
-    columnStyles: {
-      0: { cellWidth: 55, fontStyle: 'bold' }, // Column 1: Company Name
-      1: { cellWidth: 68 },                   // Column 2: Scope of Work
-      2: { cellWidth: 'auto', textColor: [37, 99, 235] } // Column 3: Attached Documents
-    },
-    alternateRowStyles: {
-      fillColor: [248, 250, 252] // slate-50
-    },
-    didDrawCell: (data) => {
-      // Add direct clickable PDF link if document URL is present
-      if (data.section === 'body' && data.column.index === 2) {
-        const rowIndex = data.row.index;
-        const entry = entries[rowIndex];
-        if (entry && entry.primaryDocUrl) {
-          doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, {
-            url: entry.primaryDocUrl
-          });
+    autoTable(doc, {
+      startY: currentY,
+      head: [['Scope of Work', 'Contractor / Supplier Name', 'Phone Number', 'Email', 'Attached Estimate']],
+      body: tableRows,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8.5,
+        cellPadding: 3
+      },
+      styles: {
+        font: 'helvetica',
+        fontSize: 8,
+        textColor: [30, 41, 59],
+        cellPadding: 3,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.2,
+        valign: 'middle'
+      },
+      columnStyles: {
+        0: { cellWidth: 62, fontStyle: 'bold' },
+        1: { cellWidth: 56, fontStyle: 'bold' },
+        2: { cellWidth: 34 },
+        3: { cellWidth: 56 },
+        4: { cellWidth: 'auto', textColor: [37, 99, 235] }
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252]
+      },
+      didDrawCell: (data) => {
+        if (data.section === 'body' && data.column.index === 4 && phaseEntries.length > 0) {
+          const entry = phaseEntries[data.row.index];
+          if (entry && entry.primaryDocUrl) {
+            doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, {
+              url: entry.primaryDocUrl
+            });
+          }
         }
-      }
-    },
-    margin: { left: 14, right: 14 }
+      },
+      margin: { left: 14, right: 14 }
+    });
+
+    const finalY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY;
+    currentY = (finalY || currentY + 20) + 9;
   });
 
-  // Footer on all pages
+  // Clean Page Footer
   const pageCount = (doc as unknown as { internal: { getNumberOfPages: () => number } }).internal.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
     doc.setFontSize(7.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(148, 163, 184);
-    doc.text(
-      `The Zenith Group  •  ${project.name}  •  Approved Purchase Orders Report`,
-      14,
-      doc.internal.pageSize.getHeight() - 8
-    );
-    doc.text(
-      `Page ${i} of ${pageCount}`,
-      pageWidth - 14 - 15,
-      doc.internal.pageSize.getHeight() - 8
-    );
+    doc.text(`${project.name}  •  Approved Purchase Orders`, 14, doc.internal.pageSize.getHeight() - 8);
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth - 29, doc.internal.pageSize.getHeight() - 8);
   }
 
-  // Sanitize filename and save
-  const cleanCode = (project.code || project.name || 'Project').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const dateStr = new Date().toISOString().split('T')[0];
-  doc.save(`${cleanCode}_Approved_PO_List_${dateStr}.pdf`);
+  const cleanName = (project.name || 'Project').replace(/[^a-zA-Z0-9_-]/g, '_');
+  doc.save(`${cleanName}_Approved_PO_List.pdf`);
 }
