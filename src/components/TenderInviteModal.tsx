@@ -559,10 +559,10 @@ w. ${senderWebsite}`;
           onClose();
         }, 1800);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to dispatch invitations:', err);
+      setPostDispatchStatus(`Error: ${err?.message || 'Unable to schedule invitation.'}`);
     } finally {
-      setIsDispatching(false);
     }
   };
 

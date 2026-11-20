@@ -1,29 +1,29 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  CalendarClock, 
-  X, 
-  Search, 
-  Clock, 
-  CheckCircle2, 
-  AlertCircle, 
-  XCircle, 
-  Ban, 
-  Download, 
-  RefreshCw, 
-  ExternalLink, 
-  Mail, 
-  Users, 
-  Building2, 
-  FileSpreadsheet, 
-  Calendar, 
-  Eye, 
-  Trash2, 
+import {
+  CalendarClock,
+  X,
+  Search,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  XCircle,
+  Ban,
+  Download,
+  RefreshCw,
+  ExternalLink,
+  Mail,
+  Users,
+  Building2,
+  FileSpreadsheet,
+  Calendar,
+  Eye,
+  Trash2,
   Filter
 } from 'lucide-react';
 import { ScheduledEmailJob } from '../types';
-import { 
-  generateScheduledDispatchesCsv, 
-  syncScheduledDispatchesToBackend 
+import {
+  generateScheduledDispatchesCsv,
+  syncScheduledDispatchesToBackend
 } from '../services/scheduleQueueService';
 
 interface ScheduledEmailQueueDrawerProps {
@@ -33,7 +33,9 @@ interface ScheduledEmailQueueDrawerProps {
   onCancelScheduledJob: (jobId: string, scopeId?: string) => void;
   onDeleteScheduledJob?: (jobId: string) => void;
   onSyncWithSheet?: () => Promise<void> | void;
+  onDeployAllPending?: () => Promise<void> | void;
   isSyncing?: boolean;
+  isDeployingAll?: boolean;
 }
 
 export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps> = ({
@@ -43,7 +45,9 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
   onCancelScheduledJob,
   onDeleteScheduledJob,
   onSyncWithSheet,
-  isSyncing = false
+  onDeployAllPending,
+  isSyncing = false,
+  isDeployingAll = false
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'dispatched' | 'cancelled'>('all');
@@ -108,12 +112,12 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
     const target = new Date(isoDate).getTime();
     const now = new Date().getTime();
     const diffMs = target - now;
-    
+
     if (diffMs < 0) {
       const pastHours = Math.round(Math.abs(diffMs) / (1000 * 60 * 60));
       return pastHours === 0 ? 'Just now' : `${pastHours}h ago`;
     }
-    
+
     const diffMinutes = Math.round(diffMs / (1000 * 60));
     if (diffMinutes < 60) {
       return `in ${diffMinutes}m`;
@@ -130,7 +134,7 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-slate-950/70 backdrop-blur-xs flex justify-end animate-in fade-in duration-200">
-      <div 
+      <div
         id="scheduled-email-queue-drawer"
         className="w-full max-w-5xl bg-white h-full shadow-2xl flex flex-col border-l border-slate-200 overflow-hidden"
       >
@@ -156,6 +160,31 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
           </div>
 
           <div className="flex items-center gap-2">
+            {onDeployAllPending && counts.pending > 0 && (
+              <button
+                type="button"
+                id="deploy-all-pending-emails-btn"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Deploy all ${counts.pending} pending scheduled email(s) immediately?`
+                    )
+                  ) {
+                    onDeployAllPending();
+                  }
+                }}
+                disabled={isDeployingAll}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-extrabold rounded-lg shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
+                title="Immediately send all pending scheduled emails now"
+              >
+                <Mail className={`w-3.5 h-3.5 ${isDeployingAll ? 'animate-spin' : ''}`} />
+                <span>
+                  {isDeployingAll
+                    ? 'Deploying Pending...'
+                    : `Deploy All Pending (${counts.pending})`}
+                </span>
+              </button>
+            )}
             {onSyncWithSheet && (
               <button
                 type="button"
@@ -219,11 +248,10 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
             <button
               type="button"
               onClick={() => setStatusFilter('all')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                statusFilter === 'all'
-                  ? 'bg-white text-slate-900 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${statusFilter === 'all'
+                ? 'bg-white text-slate-900 shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+                }`}
             >
               <span>All</span>
               <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-100 font-mono">
@@ -234,11 +262,10 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
             <button
               type="button"
               onClick={() => setStatusFilter('pending')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                statusFilter === 'pending'
-                  ? 'bg-amber-600 text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${statusFilter === 'pending'
+                ? 'bg-amber-600 text-white shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+                }`}
             >
               <Clock className="w-3.5 h-3.5" />
               <span>Pending</span>
@@ -250,11 +277,10 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
             <button
               type="button"
               onClick={() => setStatusFilter('dispatched')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                statusFilter === 'dispatched'
-                  ? 'bg-emerald-600 text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${statusFilter === 'dispatched'
+                ? 'bg-emerald-600 text-white shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+                }`}
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
               <span>Dispatched</span>
@@ -266,11 +292,10 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
             <button
               type="button"
               onClick={() => setStatusFilter('cancelled')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                statusFilter === 'cancelled'
-                  ? 'bg-rose-600 text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${statusFilter === 'cancelled'
+                ? 'bg-rose-600 text-white shadow-2xs'
+                : 'text-slate-600 hover:text-slate-900'
+                }`}
             >
               <XCircle className="w-3.5 h-3.5" />
               <span>Cancelled</span>
@@ -319,11 +344,10 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
                       const bccCount = (job.recipientEmails || []).length || (job.selectedRecipientIds || []).length || 1;
 
                       return (
-                        <tr 
-                          key={job.id} 
-                          className={`hover:bg-slate-50/80 transition-colors ${
-                            isPending ? 'bg-amber-50/20' : ''
-                          }`}
+                        <tr
+                          key={job.id}
+                          className={`hover:bg-slate-50/80 transition-colors ${isPending ? 'bg-amber-50/20' : ''
+                            }`}
                         >
                           {/* 1. Project Column */}
                           <td className="py-3.5 px-4 align-middle">
@@ -344,11 +368,10 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
                               {job.scopeName || 'Scope Package'}
                             </div>
                             <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className={`px-2 py-0.5 text-[9px] font-extrabold rounded-md uppercase tracking-wider border ${
-                                job.type === 'invitation'
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  : 'bg-amber-50 text-amber-700 border-amber-200'
-                              }`}>
+                              <span className={`px-2 py-0.5 text-[9px] font-extrabold rounded-md uppercase tracking-wider border ${job.type === 'invitation'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                                }`}>
                                 {job.type === 'invitation' ? 'Invitation' : 'Follow-up Reminder'}
                               </span>
                               {job.tenderDeadline && (
@@ -384,11 +407,10 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
                               <span>{job.scheduledTimeDisplay || job.scheduledTime}</span>
                             </div>
                             <div className="flex items-center gap-1 mt-0.5">
-                              <span className={`px-1.5 py-0.2 text-[10px] font-mono font-bold rounded ${
-                                isPending
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-slate-100 text-slate-600'
-                              }`}>
+                              <span className={`px-1.5 py-0.2 text-[10px] font-mono font-bold rounded ${isPending
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-slate-100 text-slate-600'
+                                }`}>
                                 {getRelativeTimeBadge(job.scheduledTime)}
                               </span>
                               {job.autoRule && (
@@ -536,9 +558,8 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px] uppercase font-bold">Status</span>
-                  <span className={`inline-block font-extrabold uppercase text-[10px] ${
-                    previewJob.status === 'pending' ? 'text-amber-600' : previewJob.status === 'dispatched' ? 'text-emerald-600' : 'text-rose-600'
-                  }`}>
+                  <span className={`inline-block font-extrabold uppercase text-[10px] ${previewJob.status === 'pending' ? 'text-amber-600' : previewJob.status === 'dispatched' ? 'text-emerald-600' : 'text-rose-600'
+                    }`}>
                     {previewJob.status}
                   </span>
                 </div>
@@ -558,7 +579,7 @@ export const ScheduledEmailQueueDrawer: React.FC<ScheduledEmailQueueDrawerProps>
                   <span className="text-slate-500 block text-[11px] font-extrabold mb-1">
                     Email HTML Body Preview:
                   </span>
-                  <div 
+                  <div
                     className="p-4 bg-white border border-slate-200 rounded-xl max-h-56 overflow-y-auto prose prose-xs"
                     dangerouslySetInnerHTML={{ __html: previewJob.generatedHtml }}
                   />

@@ -2328,6 +2328,7 @@ export default function App() {
     formLink,
     tenderDeadline,
     generatedHtml,
+    generatedPlainText,
     senderName = 'Shanice',
     senderEmail = 'shanice@thezenithgroup.ca',
     ccEmails = [],
@@ -2732,6 +2733,30 @@ export default function App() {
     }
   }, [scheduledJobsList]);
 
+  const [isDeployingAllPending, setIsDeployingAllPending] = useState(false);
+
+  const handleDeployAllPending = useCallback(async () => {
+    setIsDeployingAllPending(true);
+    try {
+      const result = await processPendingQueue(projects, contacts, true);
+      if (result.hasChanges) {
+        setProjects(result.updatedProjects);
+        storageService.saveProjects(result.updatedProjects);
+        dbService.saveProjects(result.updatedProjects);
+        refreshScheduledJobs();
+        showToast(
+          `Deployed ${result.dispatchedJobs.length} pending scheduled email(s) immediately.`
+        );
+      } else {
+        showToast('No pending scheduled emails were ready to deploy.');
+      }
+    } catch (err: any) {
+      showToast(`Deploy error: ${err?.message || 'Failed to deploy pending emails'}`);
+    } finally {
+      setIsDeployingAllPending(false);
+    }
+  }, [projects, contacts, refreshScheduledJobs]);
+
   const handleSendTenderReminders = async ({
     scopeId,
     selectedTradeIds,
@@ -2740,6 +2765,7 @@ export default function App() {
     formLink,
     tenderDeadline,
     generatedHtml,
+    generatedPlainText,
     senderName = 'Shanice',
     senderEmail = 'shanice@thezenithgroup.ca',
     ccEmails = [],
@@ -3369,7 +3395,9 @@ export default function App() {
           onCancelScheduledJob={handleCancelFromQueue}
           onDeleteScheduledJob={handleDeleteJobFromQueue}
           onSyncWithSheet={handleSyncQueueWithSheet}
+          onDeployAllPending={handleDeployAllPending}
           isSyncing={isSyncing}
+          isDeployingAll={isDeployingAllPending}
         />
         <SessionTimeoutModal
           isOpen={isSessionWarningOpen}
@@ -4174,7 +4202,9 @@ export default function App() {
         onCancelScheduledJob={handleCancelFromQueue}
         onDeleteScheduledJob={handleDeleteJobFromQueue}
         onSyncWithSheet={handleSyncQueueWithSheet}
+        onDeployAllPending={handleDeployAllPending}
         isSyncing={isSyncing}
+        isDeployingAll={isDeployingAllPending}
       />
       <SessionTimeoutModal
         isOpen={isSessionWarningOpen}

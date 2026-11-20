@@ -373,7 +373,8 @@ export function deleteScheduledJob(jobId: string): ScheduledEmailJob[] {
  */
 export async function processPendingQueue(
   projects: Project[],
-  contacts: Contact[]
+  contacts: Contact[],
+  forceDeployAll = false
 ): Promise<{
   updatedProjects: Project[];
   dispatchedJobs: ScheduledEmailJob[];
@@ -385,7 +386,9 @@ export async function processPendingQueue(
   const todayFormatted = nowIso.split('T')[0];
 
   const dueJobs = allJobs.filter(
-    (job) => job.status === 'pending' && new Date(job.scheduledTime).getTime() <= nowTime
+    (job) =>
+      job.status === 'pending' &&
+      (forceDeployAll || new Date(job.scheduledTime).getTime() <= nowTime)
   );
 
   if (dueJobs.length === 0) {
