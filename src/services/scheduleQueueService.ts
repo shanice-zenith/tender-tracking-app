@@ -1,5 +1,7 @@
 import { Project, ScopeLineItem, TradeEntry, Contact, ScheduledEmailJob, NoteItem } from '../types';
 import { appsScriptService } from './appsScriptService';
+import { gmailApiService } from './gmailApiService';
+import { googleAuthService } from './googleAuthService';
 import { doc, setDoc, deleteDoc, updateDoc, runTransaction } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { sanitizePayload } from './databaseService';
@@ -371,6 +373,8 @@ export function deleteScheduledJob(jobId: string): ScheduledEmailJob[] {
  * 4. Marks job as dispatched
  * 5. Returns updated projects and list of newly dispatched jobs
  */
+let isQueueProcessing = false;
+
 export async function processPendingQueue(
   projects: Project[],
   contacts: Contact[],
@@ -379,231 +383,302 @@ export async function processPendingQueue(
   updatedProjects: Project[];
   dispatchedJobs: ScheduledEmailJob[];
   hasChanges: boolean;
+  errorMessage?: string;
 }> {
-  const allJobs = getStoredScheduledJobs();
-  const nowTime = Date.now();
-  const nowIso = new Date(nowTime).toISOString();
-  const todayFormatted = nowIso.split('T')[0];
-
-  const dueJobs = allJobs.filter(
-    (job) =>
-      job.status === 'pending' &&
-      (forceDeployAll || new Date(job.scheduledTime).getTime() <= nowTime)
-  );
-
-  if (dueJobs.length === 0) {
+  if (isQueueProcessing) {
     return { updatedProjects: projects, dispatchedJobs: [], hasChanges: false };
   }
 
-  let projectsUpdated = false;
-  let modifiedProjects = [...projects];
-  const newlyDispatchedJobs: ScheduledEmailJob[] = [];
-  const updatedAllJobs = [...allJobs];
+  isQueueProcessing = true;
+  try {
+    const allJobs = getStoredScheduledJobs();
+    const nowTime = Date.now();
+    const nowIso = new Date(nowTime).toISOString();
+    const todayFormatted = nowIso.split('T')[0];
+    const staleDispatchCutoff = nowTime - 2 * 60 * 1000;
 
-  for (const job of dueJobs) {
-    // Atomically claim the Firestore job so browser + Cloud Function never send twice
-    if (db) {
-      try {
-        const jobRef = doc(db, 'scheduled_emails', job.id);
-        const claimed = await runTransaction(db, async (tx) => {
-          const snap = await tx.get(jobRef);
-          if (!snap.exists()) return true;
-          if (snap.data().status !== 'pending') return false;
-          tx.update(jobRef, { status: 'dispatching', updatedAt: nowIso });
-          return true;
-        });
-        if (!claimed) continue;
-      } catch (claimErr) {
-        console.warn('Scheduled job claim notice:', claimErr);
-      }
-    }
+    // Include 'pending' jobs plus any stale 'dispatching' jobs stuck > 2 minutes
+    const dueJobs = allJobs.filter((job) => {
+      const statusStr = String(job.status || '');
+      const isStaleDispatching =
+        statusStr === 'dispatching' &&
+        new Date((job as any).updatedAt || job.createdAt || 0).getTime() <= staleDispatchCutoff;
 
-    // Resolve BCC email addresses from stored recipientEmails or contact lookup
-    const resolvedEmails = new Set<string>(
-      (job.recipientEmails || []).map((e) => e.trim()).filter((e) => e.includes('@'))
-    );
-    if (resolvedEmails.size === 0) {
-      (job.selectedRecipientIds || []).forEach((id) => {
-        const custom = job.customEmails?.[id]?.trim();
-        if (custom && custom.includes('@')) {
-          resolvedEmails.add(custom);
-          return;
-        }
-        const contact = contacts.find((c) => c.id === id);
-        if (contact?.email && contact.email.includes('@')) {
-          resolvedEmails.add(contact.email.trim());
-        }
-      });
-    }
-
-    const bccRecipients = Array.from(resolvedEmails).filter(
-      (e) => e.toLowerCase() !== 'info@thezenithgroup.ca'
-    );
-
-    const subject =
-      (job as any).subject ||
-      (job.type === 'reminder'
-        ? `Tender Follow-up: ${job.projectName || 'Project'} - ${job.scopeName || 'Scope'} Estimate Reminder`
-        : `Estimate Request: ${job.projectName || 'Project'} - ${job.scopeName || 'Scope'}`);
-
-    const htmlBody =
-      job.generatedHtml ||
-      `<p>Hello,</p><p>Please review the tender package for <strong>${job.projectName || 'Project'} — ${job.scopeName || 'Scope'}</strong> (Deadline: ${job.tenderDeadline || 'TBD'}).</p><p><a href="${job.driveLink || '#'}">View Plans &amp; Specifications</a> | <a href="${job.formLink || '#'}">Submit Estimate</a></p>`;
-
-    const endpointUrl = appsScriptService.getEndpointUrl();
-    const dispatchRes = await appsScriptService.dispatchSingleBccBatch({
-      endpointUrl,
-      to: 'info@thezenithgroup.ca',
-      bccRecipients,
-      subject,
-      htmlBody,
-      cc: job.ccEmails || []
+      if (statusStr !== 'pending' && !isStaleDispatching) return false;
+      return forceDeployAll || new Date(job.scheduledTime).getTime() <= nowTime;
     });
 
-    if (!dispatchRes.success && dispatchRes.dispatchedCount === 0) {
-      // Release claim back to pending so the next cycle retries
-      if (db) {
-        updateDoc(doc(db, 'scheduled_emails', job.id), {
-          status: 'pending',
-          updatedAt: new Date().toISOString()
-        }).catch(() => { });
-      }
-      continue;
+    if (dueJobs.length === 0) {
+      return { updatedProjects: projects, dispatchedJobs: [], hasChanges: false };
     }
 
-    const targetProjectIndex = modifiedProjects.findIndex((p) => p.id === job.projectId);
-    if (targetProjectIndex >= 0) {
-      const targetProject = modifiedProjects[targetProjectIndex];
-      const targetScopeIndex = targetProject.scopes.findIndex((s) => s.id === job.scopeId);
+    let projectsUpdated = false;
+    let modifiedProjects = [...projects];
+    const newlyDispatchedJobs: ScheduledEmailJob[] = [];
+    const updatedAllJobs = [...allJobs];
+    let lastErrorMessage = '';
 
-      if (targetScopeIndex >= 0) {
-        const targetScope = targetProject.scopes[targetScopeIndex];
-        const updatedTrades = [...targetScope.trades];
+    const googleAccessToken = googleAuthService.getAccessToken();
+    const currentGoogleUser = googleAuthService.getCurrentUser();
 
-        if (job.type === 'invitation') {
-          job.selectedRecipientIds.forEach((contactId) => {
-            const contact = contacts.find((c) => c.id === contactId);
-            if (!contact) return;
-
-            const tradeIndex = updatedTrades.findIndex(
-              (t) =>
-                (t.contactId && t.contactId === contactId) ||
-                t.companyName.toLowerCase() === contact.company.toLowerCase()
-            );
-
-            const dispatchNote: NoteItem = {
-              id: `note-sched-inv-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-              text: `[AUTOMATED SCHEDULED LAUNCH] Tender invitation dispatched on ${todayFormatted} (Deadline: ${job.tenderDeadline}) from ${job.senderName || 'Zenith Estimating'}.`,
-              timestamp: nowIso,
-              author: 'Zenith Background Engine'
-            };
-
-            if (tradeIndex >= 0) {
-              updatedTrades[tradeIndex] = {
-                ...updatedTrades[tradeIndex],
-                actionStatus: 'Estimate Requested',
-                hasBeenInvited: true,
-                notes: [dispatchNote, ...updatedTrades[tradeIndex].notes]
-              };
-            } else {
-              updatedTrades.push({
-                id: `t-${targetScope.id}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                scopeId: targetScope.id,
-                contactId: contact.id,
-                contractorName: contact.name,
-                companyName: contact.company,
-                category: contact.category || (contact.trade_categories && contact.trade_categories[0]) || targetScope.name,
-                quotedFigure: 0,
-                currency: 'CAD',
-                attachedDocs: [],
-                actionStatus: 'Estimate Requested',
-                poSent: false,
-                isAwarded: false,
-                hasBeenInvited: true,
-                notes: [dispatchNote]
-              });
-            }
+    for (const job of dueJobs) {
+      // Atomically claim the Firestore job so browser + background trigger never send twice
+      if (db) {
+        try {
+          const jobRef = doc(db, 'scheduled_emails', job.id);
+          const claimed = await runTransaction(db, async (tx) => {
+            const snap = await tx.get(jobRef);
+            if (!snap.exists()) return true;
+            const data = snap.data();
+            const st = String(data.status || '');
+            const isStale =
+              st === 'dispatching' &&
+              new Date(data.updatedAt || data.createdAt || 0).getTime() <= staleDispatchCutoff;
+            if (st !== 'pending' && !isStale) return false;
+            tx.update(jobRef, { status: 'dispatching', updatedAt: nowIso });
+            return true;
           });
-
-          const updatedScopes = [...targetProject.scopes];
-          updatedScopes[targetScopeIndex] = {
-            ...targetScope,
-            googleFormUrl: job.formLink || targetScope.googleFormUrl,
-            tenderDeadline: job.tenderDeadline || targetScope.tenderDeadline,
-            trades: updatedTrades,
-            scheduledInvite: { ...job, status: 'dispatched', dispatchedAt: nowIso }
-          };
-          modifiedProjects[targetProjectIndex] = {
-            ...targetProject,
-            scopes: updatedScopes,
-            updatedAt: nowIso
-          };
-          projectsUpdated = true;
-        } else if (job.type === 'reminder') {
-          const auditedTrades = updatedTrades.map((trade) => {
-            if (!job.selectedRecipientIds.includes(trade.id) || !isTradeEligibleForReminder(trade)) {
-              return trade;
-            }
-            const reminderNote: NoteItem = {
-              id: `note-sched-rem-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-              text: `[AUTOMATED SCHEDULED REMINDER] Follow-up reminder dispatched on ${todayFormatted} (Deadline: ${job.tenderDeadline}) from ${job.senderName || 'Zenith Estimating'}.`,
-              timestamp: nowIso,
-              author: 'Zenith Background Engine'
-            };
-            return {
-              ...trade,
-              actionStatus: 'Follow-up Pending' as const,
-              notes: [reminderNote, ...trade.notes]
-            };
-          });
-
-          const updatedScopes = [...targetProject.scopes];
-          updatedScopes[targetScopeIndex] = {
-            ...targetScope,
-            googleFormUrl: job.formLink || targetScope.googleFormUrl,
-            tenderDeadline: job.tenderDeadline || targetScope.tenderDeadline,
-            trades: auditedTrades,
-            scheduledReminder: { ...job, status: 'dispatched', dispatchedAt: nowIso }
-          };
-          modifiedProjects[targetProjectIndex] = {
-            ...targetProject,
-            scopes: updatedScopes,
-            updatedAt: nowIso
-          };
-          projectsUpdated = true;
+          if (!claimed) continue;
+        } catch (claimErr) {
+          console.warn('Scheduled job claim notice:', claimErr);
         }
       }
+
+      // Resolve BCC email addresses from stored recipientEmails or contact lookup
+      const resolvedEmails = new Set<string>(
+        (job.recipientEmails || []).map((e) => e.trim()).filter((e) => e.includes('@'))
+      );
+      if (resolvedEmails.size === 0) {
+        (job.selectedRecipientIds || []).forEach((id) => {
+          const custom = job.customEmails?.[id]?.trim();
+          if (custom && custom.includes('@')) {
+            resolvedEmails.add(custom);
+            return;
+          }
+          const contact = contacts.find((c) => c.id === id);
+          if (contact?.email && contact.email.includes('@')) {
+            resolvedEmails.add(contact.email.trim());
+          }
+        });
+      }
+
+      const bccRecipients = Array.from(resolvedEmails).filter(
+        (e) => e.toLowerCase() !== 'info@thezenithgroup.ca'
+      );
+
+      if (bccRecipients.length === 0) {
+        if (db) {
+          updateDoc(doc(db, 'scheduled_emails', job.id), {
+            status: 'cancelled',
+            updatedAt: new Date().toISOString()
+          }).catch(() => { });
+        }
+        continue;
+      }
+
+      const subject =
+        (job as any).subject ||
+        (job.type === 'reminder'
+          ? `Tender Follow-up: ${job.projectName || 'Project'} - ${job.scopeName || 'Scope'} Estimate Reminder`
+          : `Estimate Request: ${job.projectName || 'Project'} - ${job.scopeName || 'Scope'}`);
+
+      const htmlBody =
+        job.generatedHtml ||
+        `<p>Hello,</p><p>Please review the tender package for <strong>${job.projectName || 'Project'} — ${job.scopeName || 'Scope'}</strong> (Deadline: ${job.tenderDeadline || 'TBD'}).</p><p><a href="${job.driveLink || '#'}">View Plans &amp; Specifications</a> | <a href="${job.formLink || '#'}">Submit Estimate</a></p>`;
+
+      let dispatchRes: { success: boolean; dispatchedCount: number; message?: string; errorMessage?: string };
+
+      // 1. Prefer Google Gmail API when user has an active Google OAuth token (same engine as Send Immediately)
+      if (googleAccessToken) {
+        dispatchRes = await gmailApiService.dispatchSingleBccBatch({
+          accessToken: googleAccessToken,
+          senderName: job.senderName || currentGoogleUser?.name || 'Shanice',
+          senderEmail: job.senderEmail || currentGoogleUser?.email || 'shanice@thezenithgroup.ca',
+          to: 'info@thezenithgroup.ca',
+          bccRecipients,
+          subject,
+          htmlBody,
+          cc: job.ccEmails || []
+        });
+
+        // If OAuth token expired (401), clear stale token and fall back to Apps Script
+        if (!dispatchRes.success && (dispatchRes.errorMessage || '').includes('401')) {
+          googleAuthService.setAccessToken(null);
+          const endpointUrl = appsScriptService.getEndpointUrl();
+          if (endpointUrl) {
+            dispatchRes = await appsScriptService.dispatchSingleBccBatch({
+              endpointUrl,
+              to: 'info@thezenithgroup.ca',
+              bccRecipients,
+              subject,
+              htmlBody,
+              cc: job.ccEmails || []
+            });
+          }
+        }
+      } else {
+        // 2. Fallback to Apps Script endpoint
+        const endpointUrl = appsScriptService.getEndpointUrl();
+        dispatchRes = await appsScriptService.dispatchSingleBccBatch({
+          endpointUrl,
+          to: 'info@thezenithgroup.ca',
+          bccRecipients,
+          subject,
+          htmlBody,
+          cc: job.ccEmails || []
+        });
+      }
+
+      if (!dispatchRes.success && dispatchRes.dispatchedCount === 0) {
+        lastErrorMessage =
+          dispatchRes.errorMessage ||
+          'Email dispatch failed. Please re-sign in with your @thezenithgroup.ca Google account.';
+        if (db) {
+          updateDoc(doc(db, 'scheduled_emails', job.id), {
+            status: 'pending',
+            updatedAt: new Date().toISOString()
+          }).catch(() => { });
+        }
+        continue;
+      }
+
+      const targetProjectIndex = modifiedProjects.findIndex((p) => p.id === job.projectId);
+      if (targetProjectIndex >= 0) {
+        const targetProject = modifiedProjects[targetProjectIndex];
+        const targetScopeIndex = targetProject.scopes.findIndex((s) => s.id === job.scopeId);
+
+        if (targetScopeIndex >= 0) {
+          const targetScope = targetProject.scopes[targetScopeIndex];
+          const updatedTrades = [...targetScope.trades];
+
+          if (job.type === 'invitation') {
+            job.selectedRecipientIds.forEach((contactId) => {
+              const contact = contacts.find((c) => c.id === contactId);
+              if (!contact) return;
+
+              const tradeIndex = updatedTrades.findIndex(
+                (t) =>
+                  (t.contactId && t.contactId === contactId) ||
+                  t.companyName.toLowerCase() === contact.company.toLowerCase()
+              );
+
+              const dispatchNote: NoteItem = {
+                id: `note-sched-inv-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                text: `[AUTOMATED SCHEDULED LAUNCH] Tender invitation dispatched on ${todayFormatted} (Deadline: ${job.tenderDeadline}) from ${job.senderName || 'Zenith Estimating'}.`,
+                timestamp: nowIso,
+                author: 'Zenith Background Engine'
+              };
+
+              if (tradeIndex >= 0) {
+                updatedTrades[tradeIndex] = {
+                  ...updatedTrades[tradeIndex],
+                  actionStatus: 'Estimate Requested',
+                  hasBeenInvited: true,
+                  notes: [dispatchNote, ...updatedTrades[tradeIndex].notes]
+                };
+              } else {
+                updatedTrades.push({
+                  id: `t-${targetScope.id}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                  scopeId: targetScope.id,
+                  contactId: contact.id,
+                  contractorName: contact.name,
+                  companyName: contact.company,
+                  category: contact.category || (contact.trade_categories && contact.trade_categories[0]) || targetScope.name,
+                  quotedFigure: 0,
+                  currency: 'CAD',
+                  attachedDocs: [],
+                  actionStatus: 'Estimate Requested',
+                  poSent: false,
+                  isAwarded: false,
+                  hasBeenInvited: true,
+                  notes: [dispatchNote]
+                });
+              }
+            });
+
+            const updatedScopes = [...targetProject.scopes];
+            updatedScopes[targetScopeIndex] = {
+              ...targetScope,
+              googleFormUrl: job.formLink || targetScope.googleFormUrl,
+              tenderDeadline: job.tenderDeadline || targetScope.tenderDeadline,
+              trades: updatedTrades,
+              scheduledInvite: { ...job, status: 'dispatched', dispatchedAt: nowIso }
+            };
+            modifiedProjects[targetProjectIndex] = {
+              ...targetProject,
+              scopes: updatedScopes,
+              updatedAt: nowIso
+            };
+            projectsUpdated = true;
+          } else if (job.type === 'reminder') {
+            const auditedTrades = updatedTrades.map((trade) => {
+              if (!job.selectedRecipientIds.includes(trade.id) || !isTradeEligibleForReminder(trade)) {
+                return trade;
+              }
+              const reminderNote: NoteItem = {
+                id: `note-sched-rem-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                text: `[AUTOMATED SCHEDULED REMINDER] Follow-up reminder dispatched on ${todayFormatted} (Deadline: ${job.tenderDeadline}) from ${job.senderName || 'Zenith Estimating'}.`,
+                timestamp: nowIso,
+                author: 'Zenith Background Engine'
+              };
+              return {
+                ...trade,
+                actionStatus: 'Follow-up Pending' as const,
+                notes: [reminderNote, ...trade.notes]
+              };
+            });
+
+            const updatedScopes = [...targetProject.scopes];
+            updatedScopes[targetScopeIndex] = {
+              ...targetScope,
+              googleFormUrl: job.formLink || targetScope.googleFormUrl,
+              tenderDeadline: job.tenderDeadline || targetScope.tenderDeadline,
+              trades: auditedTrades,
+              scheduledReminder: { ...job, status: 'dispatched', dispatchedAt: nowIso }
+            };
+            modifiedProjects[targetProjectIndex] = {
+              ...targetProject,
+              scopes: updatedScopes,
+              updatedAt: nowIso
+            };
+            projectsUpdated = true;
+          }
+        }
+      }
+
+      const dispatchedJob: ScheduledEmailJob = {
+        ...job,
+        status: 'dispatched',
+        dispatchedAt: nowIso
+      };
+
+      const jobIdx = updatedAllJobs.findIndex((j) => j.id === job.id);
+      if (jobIdx >= 0) updatedAllJobs[jobIdx] = dispatchedJob;
+      newlyDispatchedJobs.push(dispatchedJob);
+
+      if (db) {
+        setDoc(
+          doc(db, 'scheduled_emails', job.id),
+          sanitizePayload({ ...dispatchedJob, updatedAt: nowIso }),
+          { merge: true }
+        ).catch(() => { });
+      }
     }
 
-    const dispatchedJob: ScheduledEmailJob = {
-      ...job,
-      status: 'dispatched',
-      dispatchedAt: nowIso
+    if (newlyDispatchedJobs.length > 0) {
+      try {
+        localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(updatedAllJobs));
+      } catch (_) { }
+      syncScheduledDispatchesToBackend(updatedAllJobs);
+    }
+
+    return {
+      updatedProjects: modifiedProjects,
+      dispatchedJobs: newlyDispatchedJobs,
+      hasChanges: projectsUpdated || newlyDispatchedJobs.length > 0,
+      errorMessage: newlyDispatchedJobs.length === 0 ? lastErrorMessage : undefined
     };
-
-    const jobIdx = updatedAllJobs.findIndex((j) => j.id === job.id);
-    if (jobIdx >= 0) updatedAllJobs[jobIdx] = dispatchedJob;
-    newlyDispatchedJobs.push(dispatchedJob);
-
-    if (db) {
-      setDoc(
-        doc(db, 'scheduled_emails', job.id),
-        sanitizePayload({ ...dispatchedJob, updatedAt: nowIso }),
-        { merge: true }
-      ).catch(() => { });
-    }
+  } finally {
+    isQueueProcessing = false;
   }
-
-  if (newlyDispatchedJobs.length > 0) {
-    try {
-      localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(updatedAllJobs));
-    } catch (_) { }
-    syncScheduledDispatchesToBackend(updatedAllJobs);
-  }
-
-  return {
-    updatedProjects: modifiedProjects,
-    dispatchedJobs: newlyDispatchedJobs,
-    hasChanges: projectsUpdated || newlyDispatchedJobs.length > 0
-  };
 }

@@ -2748,7 +2748,7 @@ export default function App() {
           `Deployed ${result.dispatchedJobs.length} pending scheduled email(s) immediately.`
         );
       } else {
-        showToast('No pending scheduled emails were ready to deploy.');
+        showToast(result.errorMessage || 'No pending scheduled emails were ready to deploy.');
       }
     } catch (err: any) {
       showToast(`Deploy error: ${err?.message || 'Failed to deploy pending emails'}`);
